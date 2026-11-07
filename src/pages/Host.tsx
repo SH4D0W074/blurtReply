@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowRight, ArrowUpRight, Check, Copy, Eye, MessageCircle, Monitor, RefreshCw, RotateCcw, Users } from 'lucide-react';
 import type { Pairing, RoomAction, RoomSnapshot } from '../../shared/types';
@@ -34,6 +34,7 @@ export default function Host() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'responses' | 'pairs'>('responses');
   const responses = useMemo(() => room?.host?.responses.filter(response => response.stage === (room.phase === 'retest' ? 'transfer' : 'initial')) ?? [], [room]);
+  useEffect(() => { if (!room?.pairings.length) setActiveTab('responses'); }, [room?.pairings.length]);
   const tabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!room?.pairings.length || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
