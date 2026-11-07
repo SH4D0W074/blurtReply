@@ -20,5 +20,5 @@ fi
 if [ ! -f .env.local ]; then
   cp .env.example .env.local
 fi
-echo "Starting VivaCoach. Open http://localhost:3000 when the server is ready."
+echo "Starting blurtReply. Open http://localhost:3000 when the server is ready."
 exec ./node_modules/.bin/tsx server/index.ts

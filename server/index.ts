@@ -35,10 +35,10 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 server.listen(port, host, () => {
-  console.log(`VivaCoach is ready at http://localhost:${port}`);
+  console.log(`blurtReply is ready at http://localhost:${port}`);
   console.log(localOnly ? 'Local mode: this computer only.' : 'LAN binding enabled. Only use a trusted network.');
 });
-server.on('error', error => { console.error(`VivaCoach could not start: ${error.message}`); process.exitCode = 1; });
+server.on('error', error => { console.error(`blurtReply could not start: ${error.message}`); process.exitCode = 1; });
 
 let stopping = false;
 function shutdown() {

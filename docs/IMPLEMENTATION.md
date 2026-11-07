@@ -1,4 +1,4 @@
-# VivaCoach implementation
+# blurtReply implementation
 
 ## Product
 
@@ -15,20 +15,22 @@ Every agent has a distinct instruction set, output contract and state transition
 
 ## Experience
 
-Visual thesis: a focused midnight-blue rehearsal studio, with warm white typography and one electric periwinkle accent. A large audio-responsive voice form anchors the practice screen. Instrument Sans and Newsreader retain locally served fonts.
+Visual thesis: a focused midnight-blue revision studio, with warm white typography and one electric periwinkle accent. A large audio-responsive voice form anchors the practice screen. Instrument Sans and Newsreader retain locally served fonts.
 
 Content: course preparation, a question-and-answer stage with source/evidence inspector, and an actionable session review. No classroom pairing, host dashboard or votes.
 
-Interaction: voice form reacts to actual microphone level; an examiner question transitions into evidence from the submitted answer; agent activity shows real handoffs without fabricated progress percentages. Respect reduced motion and provide editable text input throughout.
+Interaction: the question finishes speaking before the microphone opens; the voice form reacts to actual microphone level; an examiner question transitions into the student's highlighted claim and source evidence. Agent activity shows real handoffs without fabricated progress percentages. Respect reduced motion and provide editable text input throughout.
 
 ## Architecture and ownership
 
 - React/Vite/TypeScript interface, Express server, local SQLite. Existing OpenAI key stays in ignored `.env.local`.
 - PDF text extracted in the browser with PDF.js. Text/Markdown can also be read locally. Only extracted text is sent to the application server. Scanned PDFs require pasted text; no OCR promise.
-- Microphone records bounded turns, then OpenAI `gpt-transcribe` transcribes them. The transcript is editable before submission. Audio is not stored by this app.
+- Microphone records bounded turns, then OpenAI `gpt-transcribe` transcribes them. A voice session submits the completed transcript automatically after **Done speaking**, unless transcript review is enabled or a draft/interrupt needs attention. The manual typed path remains available. Audio is not stored by this app.
 - Examiner audio uses browser speech by default; optional ElevenLabs synthesis uses a server-held key and caches each question's audio. Playback and recording can be stopped.
 - Loopback-only server by default. Browser identity owns its sessions; no public sharing or deployment.
-- Pairwise remains at `SH4D0W074/pairwise`, tag `pairwise-v1`, commit `059cd8f`. VivaCoach uses a separate branch and private backup repository.
+- Supabase is not required: the local SQLite database stores course content, answers and reviews, and an anonymous browser cookie controls access. Accounts and cross-device synchronisation are outside this local prototype.
+- Existing `vivacoach` database, cookie, environment-variable and browser-storage names remain internal compatibility identifiers so the blurtReply rename preserves saved sessions and configuration.
+- Pairwise remains at `SH4D0W074/pairwise`, tag `pairwise-v1`, commit `059cd8f`. blurtReply uses a separate branch and private backup repository.
 
 ## API contract
 
@@ -57,4 +59,4 @@ Real source upload, quote provenance, evidence-checker veto, bounded tool execut
 
 - [OpenAI file transcription](https://developers.openai.com/api/docs/guides/speech-to-text): completed recordings through `audio.transcriptions.create` using `gpt-transcribe`.
 - [OpenAI GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna): economical text model used for the four roles.
-- [ElevenLabs text-to-speech](https://elevenlabs.io/docs/eleven-api/guides/how-to/text-to-speech/streaming): optional server-held voice key and audio generation. The integration is implemented; live verification requires a key.
+- [ElevenLabs text-to-speech](https://elevenlabs.io/docs/eleven-api/guides/how-to/text-to-speech/streaming): server-held voice key and audio generation. Real playback and cached replay were verified on 7 November 2026.

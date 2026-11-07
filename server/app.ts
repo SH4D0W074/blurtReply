@@ -85,7 +85,7 @@ export function createApp(options: AppOptions = {}) {
       if (origin) {
         try {
           if (new URL(origin).host !== req.headers.host) throw new Error('Cross-origin request');
-        } catch { return next(new HttpError(403, 'Open this action from your VivaCoach page.', 'ORIGIN_MISMATCH')); }
+        } catch { return next(new HttpError(403, 'Open this action from your blurtReply page.', 'ORIGIN_MISMATCH')); }
       }
       if (req.headers['sec-fetch-site'] === 'cross-site') {
         return next(new HttpError(403, 'Cross-site requests are not accepted.', 'ORIGIN_MISMATCH'));
@@ -175,7 +175,7 @@ export function createApp(options: AppOptions = {}) {
     } else if (error instanceof SyntaxError && 'body' in error) {
       res.status(400).json({ error: 'The request contained invalid JSON.', code: 'INVALID_JSON' });
     } else {
-      console.error('[VivaCoach] Request failed:', error instanceof Error ? error.name : 'UnknownError');
+      console.error('[blurtReply] Request failed:', error instanceof Error ? error.name : 'UnknownError');
       res.status(500).json({ error: 'The local server could not finish this request. Saved material and answers remain available.', code: 'SERVER_ERROR' });
     }
   };

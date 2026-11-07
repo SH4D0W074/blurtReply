@@ -1,4 +1,4 @@
-name: Check VivaCoach
+name: Check blurtReply
 
 on:
   push:

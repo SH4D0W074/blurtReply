@@ -31,12 +31,16 @@ async function voicePractice(page: Page, mode: 'live' | 'demo' = 'live') {
   await page.route('**/api/status', route => route.fulfill({ json: status }));
   await page.route(`**/api/practices/${id}`, route => route.fulfill({ json: { ...session, mode } }));
   await page.addInitScript(() => {
-    const state = { deviceCalls: 0, audioPlays: 0, audio: null as HTMLMediaElement | null };
+    const state = { deviceCalls: 0, audioPlays: 0, microphoneRequests: 0, audio: null as HTMLMediaElement | null };
     Object.assign(window, { voiceTest: state });
     Object.defineProperty(window, 'speechSynthesis', { value: {
       cancel() {}, getVoices() { return []; },
       speak() { state.deviceCalls += 1; },
     } });
+    navigator.mediaDevices.getUserMedia = async () => {
+      state.microphoneRequests += 1;
+      throw new DOMException('No microphone is needed for manual question playback.', 'NotAllowedError');
+    };
     const play = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = async function () {
       await play.call(this);
@@ -85,11 +89,15 @@ test('the free guided demo uses device speech even when ElevenLabs is configured
   const id = await voicePractice(page, 'demo');
   let paidRequests = 0;
   await page.route(`**/api/practices/${id}/question-audio`, route => { paidRequests += 1; return route.abort(); });
+  await page.route(`**/api/practices/${id}/transcriptions`, route => { paidRequests += 1; return route.abort(); });
   await page.goto(`/practice/${id}`);
+  await expect(page.getByRole('button', { name: 'Start voice session', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Start local microphone rehearsal', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Hear the question', exact: true }).click();
   await expect(page.locator('.question-playback')).toContainText('Device voice');
   expect(await page.evaluate(() => (window as unknown as { voiceTest: { deviceCalls: number } }).voiceTest.deviceCalls)).toBe(1);
   expect(paidRequests).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as { voiceTest: { microphoneRequests: number } }).voiceTest.microphoneRequests)).toBe(0);
 });
 
 test('cancelling a pending question prevents late playback and device fallback', async ({ page }) => {

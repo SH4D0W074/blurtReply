@@ -40,7 +40,7 @@ test('a six-answer demo shows source evidence, survives reload, and links the fi
   await expect(page.locator('.turn-detail')).toHaveCount(6);
   await page.locator('.review-point__links').getByRole('button', { name: 'Your answer', exact: true }).first().click();
   await expect(page.locator('details.turn-detail[open]')).toHaveCount(1);
-  await page.getByRole('link', { name: 'VivaCoach home' }).click();
+  await page.getByRole('link', { name: 'blurtReply home' }).click();
   await expect(page.locator('.recent-row').first()).toContainText('6 of 6 answers');
   await page.locator('.recent-row').first().click();
   await expect(page).toHaveURL(savedUrl);
@@ -64,19 +64,6 @@ test('mobile biology practice supports keyboard tabs, reading mode, and an early
   await page.getByRole('button', { name: 'Create my review' }).click();
   await expect(page.locator('.review-intro')).toContainText('1 answer completed');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-});
-
-test('microphone denial leaves a working typed path with honest demo fallback', async ({ page }) => {
-  await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Denied for this test', 'NotAllowedError'); };
-  });
-  await startDemo(page);
-  await page.getByRole('button', { name: 'Start local microphone rehearsal' }).click();
-  await expect(page.getByRole('alert')).toContainText('Microphone access wasn’t allowed');
-  await page.getByLabel('Your answer', { exact: true }).fill('I am still thinking about what these variables have in common.');
-  await page.getByRole('button', { name: 'Submit answer', exact: true }).click();
-  await expect(page.locator('.practice-progress__label')).toContainText('02');
-  await expect(page.locator('.evidence__provenance')).toContainText('Fallback feedback');
 });
 
 function selectablePdf(): Buffer {

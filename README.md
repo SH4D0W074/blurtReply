@@ -1,10 +1,10 @@
-# VivaCoach
+# blurtReply
 
 **Explain it aloud. Find out what needs another look.**
 
-VivaCoach turns course material into a short oral revision session. A student explains a concept, answers an adaptive follow-up, and receives feedback that points to their own words and the supplied notes. Built for GreatUniHack's Reply **AI on Campus** challenge, with teaching and learning at its centre.
+blurtReply turns course material into a short oral revision session. A student explains a concept, answers an adaptive follow-up, and receives feedback that points to their own words and the supplied notes. Built for GreatUniHack's Reply **AI on Campus** challenge, with teaching and learning at its centre.
 
-![VivaCoach revision studio](docs/images/vivacoach-preview.png)
+![blurtReply revision studio](docs/images/blurt-reply-preview.png)
 
 ## Start locally
 
@@ -31,11 +31,13 @@ pnpm start
 
 1. Choose the statistics or cell biology sample, or import a selectable-text PDF, text file, Markdown file, or pasted notes.
 2. Start a live practice or the free guided demo.
-3. Speak an answer and review its transcript before submitting, or type directly.
+3. Select **Start voice session**. Hear the question, explain your answer, then select **Done speaking** to transcribe and send it. Enable **Review transcript before sending** if you prefer to check each answer first, or type directly.
 4. Watch the examiner retrieve source material and the evidence checker review its proposed feedback.
 5. Answer the follow-up. Finish after six answers, or end early for a review of the work actually completed.
 
-The demo's **Use example answer** button inserts an explicitly authored answer. Demo feedback is a walkthrough, not a live AI assessment. Its microphone lets you rehearse locally; live transcription is available in live mode.
+The demo's **Use example answer** button inserts an explicitly authored answer. Demo feedback is a walkthrough, not a live AI assessment. Its question playback uses device speech, and the demo has no microphone step.
+
+Voice sessions continue into the next spoken question automatically. **Pause** stops the microphone and question playback; **Stop voice** returns to manual controls without ending the practice. Opening a source passage or putting the page in the background pauses voice. A late transcript is kept as a draft after a pause and requires explicit submission. Reloading a page never starts recording or playback by itself.
 
 ## Four cooperating agents
 
@@ -69,7 +71,7 @@ To enable ElevenLabs:
 1. Create a key in the [ElevenLabs API dashboard](https://elevenlabs.io/app/api/api-keys) with Text to Speech access.
 2. Save it as `ELEVENLABS_API_KEY` in `.env.local`. The default voice is **George** (`JBFqnCBsd6RMkjVDRZzb`); change `ELEVENLABS_VOICE_ID` to use another voice available to your account.
 3. Keep `VIVACOACH_LIVE_AI=true`, restart the server, and refresh the browser.
-4. Start a **live practice** and select **Hear the question**. The playback label names ElevenLabs, or explicitly identifies device fallback if synthesis or playback fails.
+4. Start a **live practice** and select **Start voice session**, or use **Hear the question** for manual playback. The playback label names ElevenLabs, or explicitly identifies device fallback if synthesis or playback fails.
 
 The key stays on the server. Only the current saved question can be synthesised, using `eleven_flash_v2_5`. Audio is generated on demand and cached in memory; replaying a cached question makes no new provider request, including after the generation cap is reached. Cache entries can expire through eviction or server restart. **Cancel playback** stops a pending playback; a generation already sent to ElevenLabs may still be billed. Without a key, and in the free guided demo, the app uses device speech.
 
@@ -94,4 +96,4 @@ This prototype supports English revision with selectable text, not OCR, diagrams
 - [Demo walkthrough and pitch](docs/DEMO.md).
 - [Validation and known limits](docs/VALIDATION.md).
 
-Pairwise, the previous project, remains recoverable in `SH4D0W074/pairwise` at tag `pairwise-v1`. This branch is backed up separately to the private `SH4D0W074/vivacoach` repository.
+Pairwise, the previous project, remains recoverable in `SH4D0W074/pairwise` at tag `pairwise-v1`. This branch is backed up separately to the private `SH4D0W074/blurtReply` repository.

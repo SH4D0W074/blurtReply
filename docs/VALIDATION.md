@@ -1,11 +1,11 @@
-# VivaCoach validation
+# blurtReply validation
 
-Checked locally on 7 November 2026, using Node 24 and Chrome. Automated checks run on every code push to the private VivaCoach repository.
+Checked locally on 7 November 2026, using Node 24 and Chrome. Automated checks run on every code push to the private blurtReply repository.
 
 ## Automated checks
 
 - **50 unit/integration tests:** course fixtures, planner source selection, examiner tools, verifier veto/softening, provenance, prompt-injection boundaries, call budgets, timeouts, provider failures, revision evidence, session ownership, idempotency, persistence, crash recovery, audio boundaries, cached replay after the voice cap and oversized streamed audio rejection.
-- **8 browser scenarios:** full six-answer demo with source inspection and reload; mobile biology practice with early review and keyboard tabs; microphone denial with a usable typed fallback; real PDF extraction and saved upload material; voice playback at the generation cap; provider failure with one device fallback utterance; provider-free demo playback; cancellation before audio arrives. The four voice scenarios use mocked provider responses and generated PCM audio, with real browser decoding/playback in the successful case.
+- **12 browser scenarios:** full six-answer demo with source inspection and reload; mobile biology practice with early review and keyboard tabs; real PDF extraction and saved upload material; voice playback at the generation cap; provider failure with one device fallback utterance; demo playback with no microphone or provider request; cancellation before audio arrives; automatic question-to-microphone-to-answer progression; persisted transcript review; pause while transcription is pending; pause while question audio is pending; microphone denial with a usable typed fallback. Voice cases use mocked provider responses and generated PCM audio with real browser decoding/playback. A deterministic recorder and WebAudio stream cover lifecycle ordering without accessing a real microphone.
 - TypeScript checking and production build pass.
 - GitHub Actions also runs installation, typechecking, tests, build, and Chromium browser tests without real API credentials.
 
@@ -16,6 +16,7 @@ Checked locally on 7 November 2026, using Node 24 and Chrome. Automated checks r
 3. **Recorded speech:** a 5.4-second synthetic WAV produced the expected transcript through `gpt-transcribe`. Two earlier attempts using an empty system-generated file were rejected; the corrected recording and browser WebM path both passed.
 4. **Uploaded subject:** custom ethics notes produced distinct concepts for consequences/welfare, duties/constraints and character/practical judgement. Every citation matched the original supplied text. This test exposed and resolved a fragile planner quotation-copying requirement: the planner now selects source IDs and the application attaches exact text.
 5. **Live ElevenLabs playback:** after configuring the server key, Chrome played a real 5.62-second MP3 for an 89-character examiner question through the production app. The interface showed **ElevenLabs voice**, with no device fallback or browser errors. Replaying the question worked and left the generation counter unchanged. This check used one ElevenLabs generation and one OpenAI planning request; audio bytes were not independently compared.
+6. **Automatic blurtReply voice session:** the production app played the first question, opened Chrome's real recording interface with synthetic input, transcribed and automatically submitted exactly one answer, then played the adaptive follow-up. The response received live AI feedback and an evidence check. Pause released every microphone track; no device-speech fallback or browser errors occurred. This bounded check used two ElevenLabs generations, one transcription and four text requests. Desktop and mobile screenshots confirmed the new branding and controls; the tested mobile layout had no horizontal overflow.
 
 The measured eight-request text check used 5,504 input tokens and 1,512 output tokens (including 413 reasoning tokens), about $0.00131 at the documented model rates. Overall testing used a small number of additional bounded requests; account billing was not queried. No unbounded loops, automatic retries or long voice sessions were used.
 
@@ -29,7 +30,7 @@ The measured eight-request text check used 5,504 input tokens and 1,512 output t
 ## Limits of these checks
 
 - Live model outputs vary. This is a small end-to-end check, not a learning-outcome study or a broad accuracy evaluation across university subjects and accents.
-- ElevenLabs was checked with one short English question and a cached replay. This verifies the configured voice and playback path, not every voice, language or network condition.
+- ElevenLabs was checked with short English questions, a cached replay and an automatic follow-up. This verifies the configured voice and playback path, not every voice, language or network condition.
 - Microphone permission behavior and device speech vary by browser. Chrome's recording flow was verified; the typed path remains available elsewhere.
 - Scanned PDFs and diagrams are outside scope. Very long unbroken source passages or ambiguous source material can lead to labelled fallback feedback.
 

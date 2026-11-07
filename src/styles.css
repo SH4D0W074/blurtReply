@@ -171,6 +171,17 @@ svg { vertical-align: middle; flex-shrink: 0; }
 .practice-progress ol li.is-current { background: #8588c4; }
 .saved-indicator { font-size: 9px; color: var(--quiet); display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .finish-early { font-size: 10px; min-height: 32px; }
+.voice-session-toolbar { width: calc(100% - 104px); max-width: 1376px; margin: 10px auto -14px; display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--accent-bright); }
+.voice-session-toolbar > span { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.voice-session-toolbar > div { display: flex; align-items: center; gap: 24px; }
+.voice-session-toolbar .text-button { min-height: 44px; font-size: 11px; }
+.voice-session-toolbar .is-paused { background: var(--quiet); }
+@media (max-width: 650px) {
+  .voice-session-toolbar { width: calc(100% - 40px); gap: 10px; margin-bottom: 0; }
+  .voice-session-toolbar > span { font-size: 10px; }
+  .voice-session-toolbar > div { gap: 15px; }
+  .voice-session-toolbar .text-button { font-size: 10px; }
+}
 .practice-layout { width: calc(100% - 104px); max-width: 1376px; margin: 33px auto 60px; display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: clamp(40px, 5vw, 80px); align-items: start; }
 .practice-workspace { min-width: 0; }
 .practice-demo-note { font-size: 9px; color: #b9bce6; display: flex; align-items: center; gap: 8px; margin-bottom: 23px; }
@@ -236,6 +247,7 @@ svg { vertical-align: middle; flex-shrink: 0; }
 .evidence-quote { margin-top: 24px; }
 .evidence-quote .eyebrow { font-size: 8px; letter-spacing: 1.2px; }
 .evidence-quote blockquote { font-family: var(--display); font-size: 25px; line-height: 1.25; letter-spacing: -.2px; margin-top: 9px; overflow-wrap: anywhere; }
+.evidence-quote mark { color: var(--ink); background: linear-gradient(transparent 58%, #aaadff26 58%); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .evidence-quote--source { border-left: 2px solid #777cad; padding-left: 15px; }
 .evidence-quote--source blockquote { color: #c4cae0; font-size: 22px; }
 .source-link { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 9px; min-height: 44px; padding: 9px 0 0; text-align: left; }

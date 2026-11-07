@@ -128,7 +128,7 @@ export class PracticeService {
   private launch(work: () => Promise<void>) {
     const job = Promise.resolve().then(work).catch(() => {
       // Never log source text, answers, model output, credentials, or provider errors.
-      console.error('[VivaCoach] Background work stopped; saved practice data remains available.');
+      console.error('[blurtReply] Background work stopped; saved practice data remains available.');
     }).finally(() => { this.jobs.delete(job); });
     this.jobs.add(job);
   }

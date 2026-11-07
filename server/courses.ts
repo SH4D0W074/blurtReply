@@ -15,7 +15,7 @@ interface SampleData { id: string; description: string; course: CourseContent; e
 const statistics: CourseContent = {
   title: 'Correlation, confounding and causal claims',
   subject: 'Statistics',
-  sourceName: 'VivaCoach authored teaching notes · Statistics (not a university handout)',
+  sourceName: 'blurtReply authored teaching notes · Statistics (not a university handout)',
   origin: 'sample',
   excerpts: [
     { id: 'stats-association', label: '1 · Association and causation', text: 'Correlation describes an association between measured variables. An association alone does not establish that changing one variable causes the other to change. Reverse causation, a common cause that influences both variables, and chance are possible explanations. A causal claim requires evidence that helps distinguish these alternatives.' },
@@ -33,7 +33,7 @@ statistics.concepts = [
 const cells: CourseContent = {
   title: 'Membranes, ATP and gene expression',
   subject: 'Cell biology',
-  sourceName: 'VivaCoach authored teaching notes · Cell biology (not a university handout)',
+  sourceName: 'blurtReply authored teaching notes · Cell biology (not a university handout)',
   origin: 'sample',
   excerpts: [
     { id: 'cells-membranes', label: '1 · Selective permeability', text: 'The phospholipid bilayer is selectively permeable. Small nonpolar molecules such as oxygen can diffuse through its lipid region, while charged ions usually need membrane proteins to cross. Movement through a channel down an electrochemical gradient is passive transport and does not directly require ATP. Moving a substance against its electrochemical gradient requires an energy source.' },
