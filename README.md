@@ -62,7 +62,16 @@ The agents share structured state through the server. Each has a separate prompt
 
 ## Voice and cost controls
 
-OpenAI `gpt-transcribe` transcribes bounded recordings. Examiner questions use the device's speech voice by default. Set `ELEVENLABS_API_KEY` and optionally `ELEVENLABS_VOICE_ID` to enable ElevenLabs question audio; failed playback falls back to device voice. ElevenLabs requests use `eleven_flash_v2_5` and cache question audio.
+OpenAI `gpt-transcribe` transcribes bounded recordings. ElevenLabs can speak the examiner's opening questions and adaptive follow-ups; the four agents still decide what to ask and how to assess the answer.
+
+To enable ElevenLabs:
+
+1. Create a key in the [ElevenLabs API dashboard](https://elevenlabs.io/app/api/api-keys) with Text to Speech access.
+2. Save it as `ELEVENLABS_API_KEY` in `.env.local`. The default voice is **George** (`JBFqnCBsd6RMkjVDRZzb`); change `ELEVENLABS_VOICE_ID` to use another voice available to your account.
+3. Keep `VIVACOACH_LIVE_AI=true`, restart the server, and refresh the browser.
+4. Start a **live practice** and select **Hear the question**. The playback label names ElevenLabs, or explicitly identifies device fallback if synthesis or playback fails.
+
+The key stays on the server. Only the current saved question can be synthesised, using `eleven_flash_v2_5`. Audio is generated on demand and cached in memory; replaying a cached question makes no new provider request, including after the generation cap is reached. Cache entries can expire through eviction or server restart. **Cancel playback** stops a pending playback; a generation already sent to ElevenLabs may still be billed. Without a key, and in the free guided demo, the app uses device speech.
 
 Default caps per server process are 60 text model requests, 12 transcription requests, and 30 ElevenLabs requests. Failed attempts count. Calls have deadlines and no automatic retries. A practice has at most six submitted answers. The UI caps recordings at 90 seconds; the server caps audio at 2 MB, material at 30,000 characters, and each answer at 2,500 characters. Restarting the server resets request counters; these are usage limits, not a billing dashboard.
 

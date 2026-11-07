@@ -2,15 +2,15 @@
 
 ## Before presenting
 
-Open http://localhost:3000 on the presentation computer. Choose the statistics sample and prepare a live practice before the pitch, so the first question is ready. Check microphone permission and the device voice once. Keep a free guided demo in a second tab as an explicitly labelled fallback.
+Open http://localhost:3000 on the presentation computer. Choose the statistics sample and prepare a live practice before the pitch, so the first question is ready. Check microphone permission and select **Hear the question** once. When presenting ElevenLabs, confirm the label remains **ElevenLabs voice** while it plays. Keep a free guided demo in a second tab as an explicitly labelled fallback.
 
-The app runs locally, but live agents and transcription need the internet. The current working voice setup uses OpenAI transcription and device speech. ElevenLabs is optional and requires a separate key.
+The app runs locally, but live agents and transcription need the internet. OpenAI transcribes spoken answers; ElevenLabs speaks questions when its key is configured. The four cooperating agents continue to handle the learning flow. Device speech is the fallback. The free guided demo never calls ElevenLabs.
 
 ## One-minute walkthrough
 
 | Time | Show | Say or do |
 | --- | --- | --- |
-| 0–10s | The source notes and opening question | “I can recognise a definition in my notes. Can I actually explain it?” |
+| 0–10s | The source notes and opening question; play its voice | “I can recognise a definition in my notes. Can I actually explain it?” |
 | 10–20s | Record an answer; the waveform follows the sound | “If two variables increase together, that proves one causes the other.” |
 | 20–30s | Editable transcript, then Submit | Point out that the student can correct transcription before the answer is assessed. |
 | 30–45s | Agent activity | The examiner reads a course source, proposes feedback, and hands it to an independent evidence checker. Wait for the real result. |

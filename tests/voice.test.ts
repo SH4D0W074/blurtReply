@@ -63,4 +63,28 @@ describe('bounded voice providers', () => {
     await expect(service.speakQuestion('Why?', 'q1')).rejects.toMatchObject({ code: 'VOICE_LIMIT' });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it('replays cached audio after the generation budget is exhausted', async () => {
+    const fetcher = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'audio/mpeg' } }));
+    const service = createVoiceService({ environment: () => ({ ...enabled, VIVACOACH_MAX_VOICE_CALLS: '1' }), fetcher });
+    const first = await service.speakQuestion('Explain correlation.', 'q1');
+    expect(service.getVoiceStatus().remainingVoiceCalls).toBe(0);
+    await expect(service.speakQuestion('Explain correlation.', 'q1')).resolves.toEqual(first);
+    await expect(service.speakQuestion('Explain causation.', 'q2')).rejects.toMatchObject({ code: 'VOICE_LIMIT' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an oversized streamed response without caching it or exposing the provider body', async () => {
+    let cancelled = false;
+    const fetcher = vi.fn(async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new Uint8Array(2 * 1024 * 1024 + 1)); },
+      cancel() { cancelled = true; },
+    }), { headers: { 'Content-Type': 'audio/mpeg' } }));
+    const service = createVoiceService({ environment: () => enabled, fetcher });
+    await expect(service.speakQuestion('Why?', 'q1')).rejects.toMatchObject({ code: 'VOICE_FAILED' });
+    expect(cancelled).toBe(true);
+    await expect(service.speakQuestion('Why?', 'q1')).rejects.toMatchObject({ code: 'VOICE_FAILED' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(service.getVoiceStatus().remainingVoiceCalls).toBe(28);
+  });
 });

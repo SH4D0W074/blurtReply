@@ -4,8 +4,8 @@ Checked locally on 7 November 2026, using Node 24 and Chrome. Automated checks r
 
 ## Automated checks
 
-- **48 unit/integration tests:** course fixtures, planner source selection, examiner tools, verifier veto/softening, provenance, prompt-injection boundaries, call budgets, timeouts, provider failures, revision evidence, session ownership, idempotency, persistence, crash recovery and audio boundaries.
-- **4 browser scenarios:** full six-answer demo with source inspection and reload; mobile biology practice with early review and keyboard tabs; microphone denial with a usable typed fallback; real PDF extraction and saved upload material.
+- **50 unit/integration tests:** course fixtures, planner source selection, examiner tools, verifier veto/softening, provenance, prompt-injection boundaries, call budgets, timeouts, provider failures, revision evidence, session ownership, idempotency, persistence, crash recovery, audio boundaries, cached replay after the voice cap and oversized streamed audio rejection.
+- **8 browser scenarios:** full six-answer demo with source inspection and reload; mobile biology practice with early review and keyboard tabs; microphone denial with a usable typed fallback; real PDF extraction and saved upload material; voice playback at the generation cap; provider failure with one device fallback utterance; provider-free demo playback; cancellation before audio arrives. The four voice scenarios use mocked provider responses and generated PCM audio, with real browser decoding/playback in the successful case.
 - TypeScript checking and production build pass.
 - GitHub Actions also runs installation, typechecking, tests, build, and Chromium browser tests without real API credentials.
 

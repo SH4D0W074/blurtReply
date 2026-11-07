@@ -79,51 +79,67 @@ export function useMicrophone(onRecorded: (audio: Blob) => void) {
 
 export function useQuestionVoice(id: string, question: Question | null, mode: 'demo' | 'live', status: ServerStatus | null) {
   const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const [source, setSource] = useState<'elevenlabs' | 'device' | 'device-fallback' | 'unavailable' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const player = useRef<HTMLAudioElement | null>(null);
   const objectUrl = useRef<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   const epoch = useRef(0);
+  const releasePlayer = useCallback(() => {
+    if (player.current) {
+      player.current.onended = null; player.current.onerror = null;
+      player.current.pause(); player.current.src = ''; player.current = null;
+    }
+    if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; }
+  }, []);
   const stop = useCallback(() => {
     epoch.current += 1; controller.current?.abort(); controller.current = null;
-    if (player.current) { player.current.pause(); player.current.src = ''; player.current = null; }
-    if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; }
+    releasePlayer();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     setState('idle');
-  }, []);
-  useEffect(() => { stop(); setNotice(null); return stop; }, [question?.id, stop]);
+  }, [releasePlayer]);
+  useEffect(() => { stop(); setSource(null); setNotice(null); return stop; }, [id, question?.id, mode, stop]);
   const speak = async () => {
     if (!question) return;
     if (state !== 'idle') { stop(); return; }
     stop(); setNotice(null);
     const currentEpoch = epoch.current;
+    const useElevenLabs = mode === 'live' && status?.voiceProvider === 'elevenlabs';
     let deviceStarted = false;
     const deviceVoice = () => {
       if (currentEpoch !== epoch.current || deviceStarted) return;
       deviceStarted = true;
-      if (!('speechSynthesis' in window)) { setState('idle'); setNotice('Device voice isn’t available in this browser. The full question is shown above.'); return; }
+      releasePlayer();
+      if (!('speechSynthesis' in window)) {
+        setState('idle'); setSource('unavailable');
+        setNotice(useElevenLabs ? 'ElevenLabs audio is unavailable, and this browser has no device voice. You can read the full question above.' : 'Device voice isn’t available in this browser. The full question is shown above.');
+        return;
+      }
+      setSource(useElevenLabs ? 'device-fallback' : 'device');
       const utterance = new SpeechSynthesisUtterance(question.text);
       utterance.lang = 'en-GB'; utterance.rate = .94;
       const voice = window.speechSynthesis.getVoices().find(candidate => candidate.lang === 'en-GB');
       if (voice) utterance.voice = voice;
       utterance.onend = () => { if (currentEpoch === epoch.current) setState('idle'); };
-      utterance.onerror = event => { if (currentEpoch === epoch.current) { setState('idle'); if (event.error !== 'canceled' && event.error !== 'interrupted') setNotice('The device voice couldn’t play. You can read the full question above.'); } };
+      utterance.onerror = event => { if (currentEpoch === epoch.current) { setState('idle'); if (event.error !== 'canceled' && event.error !== 'interrupted') { setSource('unavailable'); setNotice('The device voice couldn’t play. You can read the full question above.'); } } };
       setState('playing'); window.speechSynthesis.speak(utterance);
     };
-    if (mode === 'live' && status?.voiceProvider === 'elevenlabs' && status.remainingVoiceCalls > 0) {
-      setState('loading'); controller.current = new AbortController();
+    if (useElevenLabs) {
+      // The server can replay cached audio even when its generation budget is exhausted.
+      setState('loading'); setSource('elevenlabs'); controller.current = new AbortController();
       try {
         const audio = await api.questionAudio(id, question.id, controller.current.signal);
         if (currentEpoch !== epoch.current) return;
         const url = URL.createObjectURL(audio); objectUrl.current = url;
         const nextPlayer = new Audio(url); player.current = nextPlayer;
-        nextPlayer.onended = () => { if (currentEpoch === epoch.current) { setState('idle'); if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; } };
-        nextPlayer.onerror = () => { if (currentEpoch === epoch.current) { setNotice('Recorded voice is unavailable. Using your device voice.'); deviceVoice(); } };
-        await nextPlayer.play(); if (currentEpoch === epoch.current) setState('playing');
+        nextPlayer.onended = () => { if (currentEpoch === epoch.current) { setState('idle'); releasePlayer(); } };
+        nextPlayer.onerror = () => { if (currentEpoch === epoch.current) { setNotice('ElevenLabs audio couldn’t play. Using your device voice.'); deviceVoice(); } };
+        await nextPlayer.play(); if (currentEpoch === epoch.current && !deviceStarted) { setSource('elevenlabs'); setState('playing'); }
       } catch (failure) {
-        if (currentEpoch === epoch.current && !(failure instanceof DOMException && failure.name === 'AbortError')) { setNotice('Recorded voice is unavailable. Using your device voice.'); deviceVoice(); }
+        if (currentEpoch === epoch.current && !(failure instanceof DOMException && failure.name === 'AbortError')) { setNotice('ElevenLabs audio is unavailable. Using your device voice.'); deviceVoice(); }
       }
     } else deviceVoice();
   };
-  return { state, notice, speak, stop };
+  const sourceLabel = source === 'device-fallback' ? 'Device voice · fallback' : source === 'device' ? 'Device voice' : source === 'unavailable' ? 'Audio unavailable' : source === 'elevenlabs' || mode === 'live' && status?.voiceProvider === 'elevenlabs' ? 'ElevenLabs voice' : mode === 'live' && !status ? 'Checking voice…' : 'Device voice';
+  return { state, sourceLabel, notice, speak, stop };
 }
