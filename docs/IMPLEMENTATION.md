@@ -26,7 +26,7 @@ Warm paper workspaces, an ink-dark presentation wall, electric vermilion actions
 - [x] Final source, local launch guide and demo script backed up to GitHub.
 - [x] CI confirmation on the final source revision (`746b9ac`).
 
-Live provider verification remains separate: credentials and a testing budget are still required. The complete local demo and fallback classroom flow run without them.
+Live provider verification is complete using synthetic input and an owner-approved budget. Both lesson checks and the live classroom browser flow passed; see [validation notes](VALIDATION.md). The complete local demo and fallback classroom flow still run without credentials.
 
 ## Acceptance checks
 

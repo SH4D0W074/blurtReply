@@ -44,13 +44,13 @@ PAIRWISE_LIVE_AI=true
 PAIRWISE_MAX_AI_CALLS=20
 ```
 
-Restart the server after changing configuration. The [documented default model](https://developers.openai.com/api/docs/models/gpt-6-luna) supports Structured Outputs; your account still needs access to it. An explicit `OPENAI_MODEL` overrides the default. Model access and the quality of actual model interpretations require a live check with your key.
+Restart the server after changing configuration. The [documented default model](https://developers.openai.com/api/docs/models/gpt-6-luna) supports Structured Outputs; your account still needs access to it. An explicit `OPENAI_MODEL` overrides the default. The owner's local account passed the live checks recorded in [validation notes](docs/VALIDATION.md); a different account or model needs its own check.
 
 The server sends submitted explanations, choices and the authored lesson rubric to OpenAI only when live analysis is explicitly enabled and a lecturer starts a review. It asks for no response storage (`store: false`); this does not mean the provider has no operational retention. No names are collected, but students should avoid putting identifying details in explanations. Face-to-face discussions are not recorded.
 
 Live analysis has a 30-second deadline, no automatic retries, a 6,000-output-token limit, and a default batch cap of eight explanations. Excess responses remain saved and explicitly unclassified; the lecturer can use comparison groups. Repeating analysis with the same cap does not advance to another batch. The configurable maximum is 40. See `.env.example` for settings.
 
-`PAIRWISE_MAX_AI_CALLS` is a **per-server-process call limit**, not a currency spending limit; restarting resets it. No paid live calls were made during the initial build. The automated tests stub the model and force live AI off in browser sessions.
+`PAIRWISE_MAX_AI_CALLS` is a **per-server-process call limit**, not a currency spending limit; restarting resets it. The owner's local installation uses a ten-call limit. Three separately approved live verification calls cost an estimated $0.000775 in total. The normal automated tests stub the model and force live AI off in browser sessions.
 
 ## Checks
 

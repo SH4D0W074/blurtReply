@@ -18,11 +18,19 @@ Inspected the landing screen, lecturer workspace, dark presentation reveal/group
 
 The final classroom regression also checks delayed polls cannot undo a successful join, saved clarifications remain visible, and a participant who missed the initial round can still submit the fresh question without inflating matched-response counts.
 
-## Still requires the owner’s credentials
+## Live OpenAI verification
 
-No paid OpenAI call was made in the initial build. The schema and error handling are tested with stubbed provider responses. Before presenting this as a live AI demonstration, enable the configured model with an approved testing budget, submit at least two deliberately different explanations and one ambiguous explanation, and inspect the real classifications and quotations.
+After the initial build, the owner supplied a key and approved a modest testing budget. Model access was verified without inference. Three live `gpt-6-luna` requests then passed on 7 November 2026 using synthetic input only:
 
-Account model access, actual response latency and interpretation quality have not been established by offline tests. API failures must remain labelled fallback output.
+- Six sampling-bias cases covered an explicit contrast, compatible coverage reasoning, ambiguity, negation and an embedded instruction that contradicted the rubric.
+- Six forces/motion cases covered the same boundaries. All twelve returned the expected category or an explicitly permitted conservative category. Non-unclear evidence quotes matched the entire submitted explanation exactly.
+- Three independent student browsers submitted a contrast and an ambiguous explanation through the real app. The lecturer received OpenAI-sourced results, private explanations stayed hidden until reveal, and publishing produced the expected discussion group.
+
+The three calls reported 3,025 input tokens and 945 output tokens in total, including reasoning tokens. No cache writes or cached input were reported, and all calls used the default service tier. At the [published standard prices](https://developers.openai.com/api/docs/models/gpt-6-luna), the estimated total is **$0.000775**; this is a usage-based estimate, not a billing-dashboard reading. The test reserved less than $0.082 even under deliberately conservative token and price assumptions, within its $1 ceiling. No automatic retries were used.
+
+Observed request times were 4.29, 3.26 and 2.75 seconds. This small smoke test establishes that the integration works with the supplied account; it is not a general accuracy benchmark, classroom learning study or latency guarantee. Future API failures must remain labelled fallback output.
+
+The local installation now enables live AI with a ten-call limit per server process. That limit resets when the server restarts. Keys and local configuration remain excluded from GitHub; the example configuration remains disabled by default.
 
 ## Deliberate limits
 
