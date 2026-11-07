@@ -1,10 +1,8 @@
 import { Route, Routes } from 'react-router-dom';
-import Home from './pages/Home';
-import Host from './pages/Host';
-import Board from './pages/Board';
-import Student from './pages/Student';
-import { ErrorScreen } from './components';
+import Home from './Home';
+import Practice from './Practice';
+import { ErrorPage } from './components';
 
 export default function App() {
-  return <><a className="skip-link" href="#main-content">Skip to content</a><Routes><Route path="/" element={<Home />} /><Route path="/host/:code" element={<Host />} /><Route path="/board/:code" element={<Board />} /><Route path="/join" element={<Student />} /><Route path="/join/:code" element={<Student />} /><Route path="*" element={<ErrorScreen message="That page isn’t here. Your next class conversation is one step away." />} /></Routes></>;
+  return <><a className="skip-link" href="#main-content">Skip to content</a><Routes><Route path="/" element={<Home />} /><Route path="/practice/:id" element={<Practice />} /><Route path="*" element={<ErrorPage message="That page isn’t part of this studio." />} /></Routes></>;
 }

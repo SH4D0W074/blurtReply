@@ -1,50 +1,35 @@
-import type { PublicLesson, RoomAction, RoomMode, RoomSnapshot, ServerStatus } from '../shared/types';
+import type { CourseInput, PracticeMode, PracticeSession, RecentPractice, SampleCourse, ServerStatus } from '../shared/types';
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number, public code?: string) {
-    super(message);
-    this.name = 'ApiError';
-  }
+  constructor(message: string, public code?: string, public status?: number) { super(message); }
 }
-
-export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, timeout = 25000): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), options.method === 'POST' ? 45000 : 10000);
+  const timer = window.setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(`/api${path}`, {
-      ...options,
-      credentials: 'same-origin',
-      cache: 'no-store',
-      signal: options.signal ?? controller.signal,
-      headers: { 'Content-Type': 'application/json', ...options.headers },
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new ApiError(data?.error ?? 'That request could not be completed.', response.status, data?.code);
-    }
-    return data as T;
+    const response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store', ...init, signal: controller.signal });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) throw new ApiError(body?.error ?? 'The studio couldn’t complete that request. Please try again.', body?.code, response.status);
+    return body as T;
   } catch (error) {
-    if (error instanceof ApiError) throw error;
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new ApiError('This is taking longer than expected. Please try again.', 0);
-    }
-    throw new ApiError('We cannot reach the session right now. Check the connection and try again.', 0);
-  } finally {
-    window.clearTimeout(timeout);
-  }
+    if (error instanceof DOMException && error.name === 'AbortError') throw new Error('That request took too long. Your work is still here. Please check the connection and try again.');
+    throw error;
+  } finally { window.clearTimeout(timer); }
 }
-
+const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 export const api = {
   status: () => request<ServerStatus>('/status'),
-  lessons: () => request<PublicLesson[]>('/lessons'),
-  create: (lessonId: string, mode: RoomMode) => request<RoomSnapshot>('/rooms', { method: 'POST', body: JSON.stringify({ lessonId, mode }) }),
-  room: (code: string, view: 'host' | 'board' | 'student') => request<RoomSnapshot>(`/rooms/${encodeURIComponent(code)}?view=${view}`),
-  join: (code: string) => request<RoomSnapshot>(`/rooms/${encodeURIComponent(code)}/join`, { method: 'POST', body: '{}' }),
-  action: (code: string, action: RoomAction, version?: number) => request<RoomSnapshot>(`/rooms/${encodeURIComponent(code)}/actions`, { method: 'POST', body: JSON.stringify({ action, version }) }),
-  respond: (code: string, stage: 'initial' | 'transfer', choiceId: string, reason: string) => request<RoomSnapshot>(`/rooms/${encodeURIComponent(code)}/responses`, { method: 'POST', body: JSON.stringify({ stage, choiceId, reason }) }),
-  clarify: (code: string, text: string) => request<RoomSnapshot>(`/rooms/${encodeURIComponent(code)}/clarification`, { method: 'POST', body: JSON.stringify({ text }) }),
+  samples: () => request<SampleCourse[]>('/samples'),
+  recent: () => request<RecentPractice[]>('/practices'),
+  create: (mode: PracticeMode, input: CourseInput) => request<PracticeSession>('/practices', json({ mode, ...input })),
+  session: (id: string) => request<PracticeSession>(`/practices/${encodeURIComponent(id)}`, {}, 10000),
+  answer: (id: string, questionId: string, answer: string, idempotencyKey: string) => request<PracticeSession>(`/practices/${encodeURIComponent(id)}/answers`, json({ questionId, answer, idempotencyKey })),
+  finish: (id: string) => request<PracticeSession>(`/practices/${encodeURIComponent(id)}/finish`, json({})),
+  transcribe: (id: string, audio: Blob) => request<{ text: string; model: string }>(`/practices/${encodeURIComponent(id)}/transcriptions`, { method: 'POST', headers: { 'Content-Type': audio.type || 'audio/webm' }, body: audio }, 65000),
+  async questionAudio(id: string, questionId: string, signal: AbortSignal) {
+    const response = await fetch(`/api/practices/${encodeURIComponent(id)}/question-audio`, { ...json({ questionId }), credentials: 'same-origin', signal });
+    if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(body?.error ?? 'Recorded question audio is unavailable.'); }
+    return response.blob();
+  },
 };
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
-}
+export function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Something interrupted that step. Please try again.'; }

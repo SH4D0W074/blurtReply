@@ -1,0 +1,115 @@
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronDown, FileText, Mic, Pause, Play, Square, Type, Volume2 } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import type { PracticeSession, ReviewPoint, ServerStatus, SourceExcerpt } from '../shared/types';
+import { api, errorMessage } from './api';
+import { AgentActivity, Badge, Brand, ConfirmDialog, ConnectionNotice, ErrorNotice, ErrorPage, Evidence, LoadingPage, SourceDialog, Spinner, Toast, VoiceForm } from './components';
+import { submissionKey, useDraft, usePractice, useStatus } from './hooks';
+import { useMicrophone, useQuestionVoice } from './voice';
+
+type SourceSelection = { source: SourceExcerpt; quote?: string };
+
+function AnswerStage({ session, status, connected, accept, notify }: { session: PracticeSession; status: ServerStatus | null; connected: boolean; accept: (next: PracticeSession) => void; notify: (message: string) => void }) {
+  const reduce = useReducedMotion();
+  const question = session.currentQuestion!;
+  const [answer, setAnswer] = useDraft(`vivacoach:answer:${session.id}:${question.id}`, '');
+  const [pending, setPending] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [recordedAudio, setRecordedAudio] = useState<Blob | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const alive = useRef(true);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const voice = useQuestionVoice(session.id, question, session.mode, status);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const transcribe = async (audio: Blob) => {
+    setTranscribing(true); setError(null); setRecordedAudio(audio);
+    try {
+      const transcript = await api.transcribe(session.id, audio);
+      if (!alive.current) return;
+      if (!transcript.text.trim()) throw new Error('No words were found in that recording. Please try again or type your answer.');
+      setAnswer(previous => previous.trim() ? `${previous.trim()}\n\n${transcript.text.trim()}` : transcript.text.trim());
+      setRecordedAudio(null); notify('Transcript added. Check the wording before you submit.'); textarea.current?.focus();
+    } catch (failure) { if (alive.current) setError(errorMessage(failure)); }
+    finally { if (alive.current) setTranscribing(false); }
+  };
+  const microphone = useMicrophone(audio => {
+    if (session.mode === 'demo') { notify('Rehearsal complete. Your audio stayed on this device. Add a typed answer to continue.'); textarea.current?.focus(); }
+    else void transcribe(audio);
+  });
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!answer.trim() || pending || answer.length > 2500 || microphone.recording || transcribing) return;
+    voice.stop(); setPending(true); setError(null);
+    try { accept(await api.answer(session.id, question.id, answer.trim(), submissionKey(session.id, question.id, answer.trim()))); }
+    catch (failure) { if (alive.current) setError(errorMessage(failure)); }
+    finally { if (alive.current) setPending(false); }
+  };
+  const canRecord = session.mode === 'demo' || !!status?.transcriptionAvailable && status.remainingTranscriptions > 0;
+  const concept = session.course.concepts.find(item => item.id === question.conceptId);
+  const seconds = Math.floor(microphone.duration);
+  return <section className="answer-stage"><div className="question-overline"><span className="eyebrow">{question.kind === 'explain' ? 'Explain it in your words' : question.kind === 'transfer' ? 'Try it in a new situation' : 'Let’s look a little closer'}</span><span>{concept?.title}</span></div><AnimatePresence mode="wait"><motion.h1 key={question.id} initial={reduce ? false : { opacity: 0, y: 9 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: reduce ? 1 : 0 }} transition={{ duration: reduce ? 0 : .25 }}>{question.text}</motion.h1></AnimatePresence><div className="question-playback"><button className="text-button" onClick={() => void voice.speak()} disabled={microphone.recording || microphone.requesting || pending}>{voice.state === 'loading' ? <Spinner size={15} /> : voice.state === 'playing' ? <Square size={13} /> : <Volume2 size={16} />}{voice.state === 'loading' ? 'Preparing voice…' : voice.state === 'playing' ? 'Stop question audio' : 'Hear the question'}</button><span>{session.mode === 'demo' || status?.voiceProvider !== 'elevenlabs' ? 'Device voice' : 'Recorded voice · device fallback'}</span></div>{voice.notice && <p className="voice-notice" role="status">{voice.notice}</p>}
+    <div className={`recording-stage ${microphone.recording ? 'is-recording' : ''}`}><VoiceForm level={microphone.level} recording={microphone.recording} /><div className="recording-controls"><button type="button" className={`record-button ${microphone.recording ? 'record-button--active' : ''}`} aria-label={microphone.recording ? 'Stop recording' : session.mode === 'demo' ? 'Start local microphone rehearsal' : 'Start recording'} disabled={!microphone.recording && (!canRecord || pending || transcribing || microphone.requesting || !connected)} onClick={() => { if (microphone.recording) microphone.stop(); else { voice.stop(); void microphone.start(); } }}>{microphone.requesting || transcribing ? <Spinner size={22} /> : microphone.recording ? <Square size={19} fill="currentColor" /> : <Mic size={23} />}</button><div className="recording-controls__text"><strong>{microphone.requesting ? 'Waiting for your microphone…' : transcribing ? 'Turning your words into text…' : microphone.recording ? 'Listening to you' : session.mode === 'demo' ? 'Rehearse out loud' : 'Say it in your own words'}</strong><span>{microphone.recording ? <><span className="recording-time">{String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}</span> / 01:30 · select the square to stop</> : !canRecord ? 'Voice transcription is unavailable. Typing is always an option.' : session.mode === 'demo' ? 'Local microphone rehearsal · type your answer below' : 'Up to 90 seconds · edit the transcript before sending'}</span></div></div>{microphone.recording && <button className="recording-discard text-button" onClick={microphone.cancel}>Discard recording</button>}</div>
+    <ErrorNotice>{microphone.error}</ErrorNotice><form className="answer-form" onSubmit={submit}><div className="answer-form__heading"><label htmlFor="answer-text"><Type size={15} /> Your answer</label>{session.mode === 'demo' && session.demoAnswer && <button type="button" className="example-answer-button" disabled={pending || transcribing || microphone.recording} onClick={() => { setAnswer(session.demoAnswer!); notify('Authored example added. You can edit it before submitting.'); textarea.current?.focus(); }}>Use example answer <ArrowDownIcon /></button>}</div><textarea ref={textarea} id="answer-text" value={answer} onChange={event => setAnswer(event.target.value)} placeholder="Start with what you know. A rough explanation is a useful place to begin…" rows={4} disabled={pending || transcribing} maxLength={2500} aria-describedby="answer-help" /><div className="answer-form__meta" id="answer-help"><span>{answer ? 'Draft saved on this device' : 'Speak, type, or combine both.'}</span><span className={answer.length > 2500 ? 'text-warning' : ''}>{answer.length.toLocaleString()} / 2,500</span></div><ErrorNotice>{error}</ErrorNotice>{recordedAudio && !transcribing && <div className="transcription-retry"><button className="text-button" type="button" onClick={() => void transcribe(recordedAudio)}>Try transcription again <ArrowRight size={14} /></button><button className="text-button" type="button" onClick={() => { setRecordedAudio(null); setError(null); }}>Discard audio</button></div>}<div className="answer-submit"><p>{session.mode === 'demo' ? 'Guided demo. Example answers follow an authored path; your own wording receives a labelled fallback.' : 'Your explanation is checked against your course material. You can question the feedback, too.'}</p><button className="button button--accent" type="submit" disabled={!answer.trim() || answer.length > 2500 || pending || transcribing || microphone.recording || microphone.requesting || !connected}>{pending ? <><Spinner /> Saving your answer…</> : <>{question.number === session.totalQuestions ? 'Finish with this answer' : 'Submit answer'}<ArrowRight size={18} /></>}</button></div></form>
+  </section>;
+}
+function ArrowDownIcon() { return <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><path d="M6.5 1v10m-4-4 4 4 4-4" stroke="currentColor" strokeWidth="1.3" /></svg>; }
+
+function Sources({ session, openSource }: { session: PracticeSession; openSource: (source: SourceExcerpt, quote?: string) => void }) {
+  return <div className="source-list"><div className="inspector-heading"><span className="eyebrow">The material behind the practice</span></div><p className="source-list__name"><FileText size={15} />{session.course.sourceName}</p>{session.course.excerpts.length ? session.course.excerpts.map(source => <button className="source-row" key={source.id} onClick={() => openSource(source)}><span><strong>{source.label}</strong><small>{source.page ? `Page ${source.page}` : 'Source excerpt'}</small><p>{source.text}</p></span><ArrowUpRight size={16} /></button>) : <p className="inspector-empty">Source excerpts will appear when your material is ready.</p>}</div>;
+}
+
+function Review({ session, openSource }: { session: PracticeSession; openSource: (source: SourceExcerpt, quote?: string) => void }) {
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const review = session.review;
+  const revealTurn = (id: string) => {
+    setHighlighted(id);
+    const target = document.getElementById(`turn-${id}`) as HTMLDetailsElement | null;
+    if (target) { target.open = true; target.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); target.focus(); }
+  };
+  const point = (item: ReviewPoint, index: number, numbered = false) => {
+    const source = session.course.excerpts.find(excerpt => excerpt.id === item.sourceId);
+    return <li key={`${item.text}-${index}`}><span className="review-point__number">{numbered ? String(index + 1).padStart(2, '0') : <Check size={16} />}</span><div><p>{item.text}</p><div className="review-point__links">{source && <button className="text-button" onClick={() => openSource(source)}><FileText size={12} />{source.label}<ArrowUpRight size={12} /></button>}{item.turnId && <button className="text-button" onClick={() => revealTurn(item.turnId!)}>Your answer <ArrowRight size={12} /></button>}</div></div></li>;
+  };
+  return <main id="main-content" className="review-main"><div className="review-intro"><div><span className="eyebrow">Your revision review</span><h1>A clearer<br /><em>place to go next.</em></h1><p>{session.course.title}<span> / </span>{session.turns.length} {session.turns.length === 1 ? 'answer' : 'answers'} completed</p></div><div className="review-intro__seal"><VoiceForm /><span>Keep explaining.<br />Keep questioning.</span></div></div>{session.mode === 'demo' && <div className="demo-banner"><Badge accent>Free guided demo</Badge><span>This review includes labelled authored examples and fallback feedback. It is a rehearsal of the experience.</span></div>}{review ? <><div className="review-provenance"><span>{review.source === 'demo' ? 'Authored demo review' : review.source === 'fallback' ? 'Fallback review' : 'Prepared by your revision coach'}</span><p>{review.note}</p></div><div className="review-columns"><section className="review-next"><span className="eyebrow">Take this into your next study session</span><h2>Your next steps<span>.</span></h2>{review.nextSteps.length ? <ol className="review-points review-points--next">{review.nextSteps.map((item, index) => point(item, index, true))}</ol> : <p className="muted">Answer a question in another practice to build specific revision steps.</p>}</section><div className="review-observations"><section><span className="eyebrow">Keep building on</span><h3>What you explained</h3><ul className="review-points">{review.strengths.length ? review.strengths.map((item, index) => point(item, index)) : <li className="review-empty">No supported strengths were identified in these answers yet.</li>}</ul></section><section><span className="eyebrow">Give a little more attention to</span><h3>What to revisit</h3><ul className="review-points">{review.revisit.length ? review.revisit.map((item, index) => point(item, index)) : <li className="review-empty">No specific revisit points were recorded in this practice.</li>}</ul></section></div></div></> : <p className="review-no-summary">Your answers are saved below. A revision review isn’t available for this practice.</p>}<section className="review-transcript"><div className="section-heading"><span className="eyebrow">The evidence behind your review</span><h2>Your conversation<span>.</span></h2></div>{session.turns.length ? session.turns.map(turn => <details id={`turn-${turn.id}`} className={`turn-detail ${highlighted === turn.id ? 'is-highlighted' : ''}`} key={turn.id} tabIndex={-1}><summary><span>{String(turn.question.number).padStart(2, '0')}</span><h3>{turn.question.text}</h3><ChevronDown size={18} /></summary><div className="turn-detail__body"><div><span className="eyebrow">Your complete answer</span><blockquote>{turn.answer}</blockquote></div><Evidence turn={turn} sources={session.course.excerpts} openSource={openSource} /></div></details>) : <p className="muted">This practice ended before an answer was submitted.</p>}</section><details className="review-agent-trace"><summary>How this review was prepared <ChevronDown size={16} /></summary><AgentActivity events={session.events} /></details><div className="review-finish"><p>Six answers are a snapshot.<br /><em>Understanding takes another conversation.</em></p><Link className="button button--accent" to="/">Start another practice <ArrowUpRight size={18} /></Link></div></main>;
+}
+
+export default function Practice() {
+  const { id = '' } = useParams();
+  const { session, accept, loading, error, connected, refresh } = usePractice(id);
+  const status = useStatus();
+  const reduce = useReducedMotion();
+  const [reading, setReading] = useDraft('vivacoach:reading', false);
+  const [inspector, setInspector] = useState<'evidence' | 'sources' | 'activity'>('activity');
+  const [sourceSelection, setSourceSelection] = useState<SourceSelection | null>(null);
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const clearToast = useCallback(() => setToast(null), []);
+  useEffect(() => { if (session?.phase === 'thinking') setInspector('activity'); else if (session?.turns.length) setInspector('evidence'); }, [session?.phase, session?.turns.length]);
+  const finish = async () => {
+    if (!session || finishing) return;
+    setConfirmFinish(false); setFinishing(true); setActionError(null);
+    try { accept(await api.finish(session.id)); } catch (failure) { setActionError(errorMessage(failure)); } finally { setFinishing(false); }
+  };
+  const openSource = (source: SourceExcerpt, quote?: string) => setSourceSelection({ source, quote });
+  const tabKey = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const tabs = ['evidence', 'sources', 'activity'] as const;
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? 2 : (tabs.indexOf(inspector) + (event.key === 'ArrowRight' ? 1 : 2)) % 3;
+    setInspector(tabs[index]); document.getElementById(`tab-${tabs[index]}`)?.focus();
+  };
+  if (loading && !session) return <LoadingPage />;
+  if (!session) return <ErrorPage message={error ?? 'This browser can’t open that practice. Return to the studio to start another one.'} retry={() => void refresh()} />;
+  const complete = session.phase === 'complete';
+  const lastTurn = session.turns.at(-1);
+  const currentNumber = session.currentQuestion?.number ?? Math.min(session.totalQuestions, session.turns.length + 1);
+  return <div className={`practice-page ${reading ? 'reading-mode' : ''} ${complete ? 'practice-page--complete' : ''}`}><header className="studio-header practice-header"><Brand compact /><div className="practice-header__course"><span>{session.course.subject || 'Course practice'}</span><strong>{session.course.title}</strong></div><div className="practice-header__actions"><Badge accent={session.mode === 'demo'}>{session.mode === 'demo' ? 'Free guided demo' : 'Live AI'}</Badge><button className="icon-button reading-toggle" aria-label={reading ? 'Turn off reading mode' : 'Turn on reading mode'} aria-pressed={reading} onClick={() => { setReading(!reading); setToast(reading ? 'Reading mode off.' : 'Reading mode on. More room for the words.'); }}><BookOpen size={18} /></button><Link className="icon-button" to="/" aria-label="Return to the studio"><ArrowLeft size={19} /></Link></div></header><ConnectionNotice connected={connected} />
+    {complete ? <Review session={session} openSource={openSource} /> : <><div className="practice-progress"><div className="practice-progress__label"><span>YOUR PRACTICE</span><strong>{String(currentNumber).padStart(2, '0')} <span>/ {String(session.totalQuestions).padStart(2, '0')}</span></strong></div><ol aria-label="Answer progress">{Array.from({ length: session.totalQuestions }, (_, index) => <li key={index} className={index < session.turns.length ? 'is-complete' : index === currentNumber - 1 ? 'is-current' : ''} aria-label={`Answer ${index + 1}${index < session.turns.length ? ', completed' : index === currentNumber - 1 ? ', current' : ''}`} />)}</ol><span className="saved-indicator"><Check size={13} /> Saved in this browser</span><button className="text-button finish-early" disabled={session.phase !== 'ready' || finishing || !connected} onClick={() => setConfirmFinish(true)}>{finishing ? <Spinner size={13} /> : null}Finish here <ArrowUpRight size={13} /></button></div>
+      <main id="main-content" className="practice-layout"><div className="practice-workspace">{session.mode === 'demo' && <div className="practice-demo-note"><span className="tiny-dot" /> Free demo · authored guidance, no AI calls</div>}<ErrorNotice>{actionError}</ErrorNotice>{session.message && <div className="session-message" role="status">{session.message}</div>}{session.phase === 'thinking' ? <section className="thinking-stage"><span className="eyebrow">{session.pendingAnswer ? 'Your answer is saved' : session.turns.length ? 'Preparing your review' : 'Preparing your practice'}</span><h1>{session.pendingAnswer ? <>Following<br /><em>your reasoning.</em></> : session.turns.length ? <>Gathering your<br /><em>takeaways.</em></> : <>Getting to know<br /><em>your material.</em></>}</h1><VoiceForm /><div className="thinking-status" role="status"><Spinner size={17} /><span>{session.events.at(-1)?.label ?? 'Opening the first step…'}</span></div>{session.pendingAnswer && <details className="pending-answer"><summary>Your saved answer <ChevronDown size={15} /></summary><p>{session.pendingAnswer}</p></details>}<p className="thinking-note">You can leave this page and return. Your practice is saved as each step finishes.</p></section> : session.currentQuestion ? <AnswerStage key={session.currentQuestion.id} session={session} status={status} connected={connected} accept={accept} notify={setToast} /> : <div className="empty-stage"><h1>Your practice is saved.</h1><p>No question is available right now. Refresh the session to check its latest state.</p><button className="button button--accent" onClick={() => void refresh()}>Check again <ArrowRight size={16} /></button></div>}</div>
+      <aside className="practice-inspector" aria-label="Evidence and course material"><div className="inspector-tabs" role="tablist" aria-label="Practice context">{(['evidence', 'sources', 'activity'] as const).map(tab => <button key={tab} id={`tab-${tab}`} role="tab" aria-selected={inspector === tab} aria-controls={`panel-${tab}`} tabIndex={inspector === tab ? 0 : -1} onKeyDown={tabKey} onClick={() => setInspector(tab)}>{tab === 'evidence' ? 'Evidence' : tab === 'sources' ? 'Sources' : 'Agents'}{tab === 'activity' && session.phase === 'thinking' && <span className="tiny-dot" />}</button>)}</div><motion.div key={inspector} initial={reduce ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .2 }} id={`panel-${inspector}`} role="tabpanel" aria-labelledby={`tab-${inspector}`} className="inspector-content">{inspector === 'activity' ? <AgentActivity events={session.events} thinking={session.phase === 'thinking'} /> : inspector === 'sources' ? <Sources session={session} openSource={openSource} /> : lastTurn ? <><div className="inspector-heading"><span className="eyebrow">A closer look at answer {String(lastTurn.question.number).padStart(2, '0')}</span><Badge>{lastTurn.feedback.source === 'demo' ? 'Demo' : lastTurn.feedback.source === 'fallback' ? 'Fallback' : 'Live'}</Badge></div><Evidence turn={lastTurn} sources={session.course.excerpts} openSource={openSource} /></> : <div className="evidence-empty"><div className="evidence-empty__symbol" aria-hidden="true"><span>“</span><i /><span>”</span></div><h2>What you say.<br /><em>What the source says.</em></h2><p>After your first answer, compare a specific claim with the passage behind it.</p><div className="evidence-empty__note"><FileText size={16} /><span>Your material is the reference point. Feedback is an invitation to investigate.</span></div></div>}</motion.div><div className="inspector-footnote">{session.mode === 'demo' ? 'Authored examples demonstrate the flow. No live agent work is simulated.' : 'AI feedback can be wrong. Open the source and check the interpretation.'}</div></aside></main></>}
+    <footer className="studio-footer practice-footer"><span>Understanding sounds like you.</span><span>{complete ? 'Review saved' : 'A practice, not a grade'}<span className="footer-separator">/</span>VivaCoach</span></footer>{sourceSelection && <SourceDialog source={sourceSelection.source} quote={sourceSelection.quote} onClose={() => setSourceSelection(null)} />}{confirmFinish && <ConfirmDialog title={`Finish with ${session.turns.length} ${session.turns.length === 1 ? 'answer' : 'answers'}?`} confirm="Create my review" onConfirm={() => void finish()} onClose={() => setConfirmFinish(false)}>Your completed answers will be saved with a revision review. Any unsent draft won’t be included.</ConfirmDialog>}<Toast message={toast} close={clearToast} />
+  </div>;
+}

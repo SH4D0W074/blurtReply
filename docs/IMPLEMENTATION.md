@@ -1,57 +1,54 @@
-# Pairwise implementation plan
+# VivaCoach implementation
 
-## Decisions
+## Product
 
-- Build the agreed peer-learning loop: answer and reason → cautious interpretation and clarification → lecturer-approved peer discussion → independent transfer question.
-- Local application first. No Supabase, Vercel account or public deployment is required.
-- React and TypeScript interface, Vite build, Node/Express server, SQLite persistence. One origin for the interface and API. Polling keeps small rooms synchronised without hosted realtime infrastructure.
-- Private GitHub backup at SH4D0W074/pairwise. Commit and push meaningful milestones; never commit keys, participant data or database files.
-- Anonymous browser identities, server-owned host controls, separate lecturer/student/presentation views. Displaying explanations is an explicit lecturer reveal; students see a disclosure before submitting.
-- Two fully authored lessons: sampling bias and forces/motion.
-- Clearly labelled demonstration fixtures. Live model failures never silently turn into simulated analysis.
+Course revision through a short oral examination. Choose a sample subject or upload/paste selectable course material, explain concepts aloud, face a follow-up aimed at a specific claim, and leave with evidence-linked revision actions. The current prototype supports English-language interactions and three concepts per practice, each with an opening question and one adaptive follow-up. Six answers are a bounded practice, not an assessment grade.
 
-## Visual direction
+## Cooperating agents
 
-Warm paper workspaces, an ink-dark presentation wall, electric vermilion actions. Instrument Sans and Newsreader. Answer objects are the main visual: answer → explanation → paired discussion. Keep ordinary controls restrained. Respect reduced motion and mobile screens.
+1. Curriculum planner extracts three concepts with exact citations from supplied material.
+2. Examiner retrieves relevant source excerpts through a bounded tool loop, interprets an answer and proposes the next question.
+3. Evidence checker independently reviews the examiner's proposal against the student's words and sources. Unsupported feedback is rejected or softened into a clarification; exact quote validation also runs in code.
+4. Revision coach reads the accumulated accepted evidence and prepares specific next steps linked to turns and source excerpts.
 
-## Milestones
+Every agent has a distinct instruction set, output contract and state transition. The session stores visible activity events and evidence; it never exposes hidden model reasoning. Demo mode is explicitly authored and incurs no model calls. Failure output is labelled, and never passed off as live agent work.
 
-- [x] Foundation, shared contracts, secret exclusions and repository setup.
-- [x] Persistent rooms, anonymous joining, host permissions and response collection.
-- [x] Evidence-checked model analysis, clarification and deterministic pairing.
-- [x] Complete lecturer, student and presentation interfaces.
-- [x] Independent transfer question, honest summaries and labelled demo mode.
-- [x] Integration, failure-path tests, keyboard controls and browser inspection.
-- [x] Local launch instructions and concise demo script.
-- [x] Final source, local launch guide and demo script backed up to GitHub.
-- [x] CI confirmation on the final source revision (`746b9ac`).
+## Experience
 
-Live provider verification is complete using synthetic input and an owner-approved budget. Both lesson checks and the live classroom browser flow passed; see [validation notes](VALIDATION.md). The complete local demo and fallback classroom flow still run without credentials.
+Visual thesis: a focused midnight-blue rehearsal studio, with warm white typography and one electric periwinkle accent. A large audio-responsive voice form anchors the practice screen. Instrument Sans and Newsreader retain locally served fonts.
 
-## Acceptance checks
+Content: course preparation, a question-and-answer stage with source/evidence inspector, and an actionable session review. No classroom pairing, host dashboard or votes.
 
-- Two independent student browsers can join, respond, refresh and continue the same room.
-- A participant cannot execute host actions or retrieve unrevealed peer reasoning or answer keys.
-- Duplicate submissions and overlapping host actions cannot create duplicate pairs or lose answers.
-- A quoted span must occur in the actual response; a valid quote is not treated as proof that the model's interpretation is correct.
-- Compatible reasoning categories do not become fabricated contradictions. Ambiguity produces clarification.
-- All submitted students receive one pair, triad or explicit solo activity.
-- A fresh question follows discussion. Summaries report actual responses rather than mastery or proven learning gains.
-- Missing credentials, slow analysis, failure, empty rooms and reconnecting all have usable states.
-- Seeded answers and analysis are labelled demonstration data.
+Interaction: voice form reacts to actual microphone level; an examiner question transitions into evidence from the submitted answer; agent activity shows real handoffs without fabricated progress percentages. Respect reduced motion and provide editable text input throughout.
+
+## Architecture and ownership
+
+- React/Vite/TypeScript interface, Express server, local SQLite. Existing OpenAI key stays in ignored `.env.local`.
+- PDF text extracted in the browser with PDF.js. Text/Markdown can also be read locally. Only extracted text is sent to the application server. Scanned PDFs require pasted text; no OCR promise.
+- Microphone records bounded turns, then OpenAI `gpt-transcribe` transcribes them. The transcript is editable before submission. Audio is not stored by this app.
+- Examiner audio uses browser speech by default; optional ElevenLabs synthesis uses a server-held key and caches each question's audio. Playback and recording can be stopped.
+- Loopback-only server by default. Browser identity owns its sessions; no public sharing or deployment.
+- Pairwise remains at `SH4D0W074/pairwise`, tag `pairwise-v1`, commit `059cd8f`. VivaCoach uses a separate branch and private backup repository.
 
 ## API contract
 
-All mutations use JSON and an HttpOnly anonymous browser session. GETs are not cached.
+- `GET /api/status` → ServerStatus.
+- `GET /api/samples` → SampleCourse[].
+- `GET /api/practices` → RecentPractice[] belonging to this browser, no identity creation on public reads.
+- `POST /api/practices {mode, sampleId? ,title?,sourceName?,text?,origin?}` → PracticeSession. Only this create mutation allocates an anonymous identity.
+- `GET /api/practices/:id` → owner-only PracticeSession. Poll while thinking to see actual agent events.
+- `POST /api/practices/:id/answers {questionId,answer,idempotencyKey}` → PracticeSession. Persist input before AI calls; reject parallel or stale submissions, replay idempotently.
+- `POST /api/practices/:id/finish {}` → PracticeSession. Allowed when ready; creates a review from completed turns.
+- `POST /api/practices/:id/transcriptions` with a raw audio body and its audio Content-Type → `{text,model}`. Owner only, bounded payload, no storage.
+- `POST /api/practices/:id/question-audio {questionId}` → MP3 of server-owned current question. Owner only; optional provider, cached.
+- Error JSON `{error,code}`; errors must not expose provider bodies or secrets.
 
-- GET /api/status → ServerStatus
-- GET /api/lessons → PublicLesson[]
-- POST /api/rooms { lessonId, mode, title? } → RoomSnapshot (host)
-- GET /api/rooms/:code?view=host|board|student → RoomSnapshot (role-filtered)
-- POST /api/rooms/:code/join {} → RoomSnapshot (student)
-- POST /api/rooms/:code/responses { stage: initial|transfer, choiceId, reason } → RoomSnapshot
-- POST /api/rooms/:code/clarification { text } → RoomSnapshot
-- POST /api/rooms/:code/actions { action, version? } → RoomSnapshot (host)
-- Errors: { error: string, code?: string }, appropriate HTTP status. Stale versions return 409.
+## Agent module contract
 
-The public lesson contract never includes answer keys, rubrics or authored example responses. Board cards include reasons only after reveal. Analysis categories are lecturer-only; student views include only their own analysis and published group. Pair IDs and aliases are anonymous, not names.
+`server/agents.ts` exports `prepareCourse(input, mode, emit)`, `reviewAnswer(course, question, answer, turns, mode, emit)`, `createReview(course, turns, mode, emit)`, and `getTextAIStatus()`; return types are CourseContent, Feedback, PracticeReview, and the text-related subset of ServerStatus. `server/courses.ts` exports sample-course previews and source material used by prepareCourse. Emit receives AgentReporter events.
+
+`server/voice.ts` exports `getVoiceStatus()`, `transcribeAudio(buffer, mime, context)`, and `speakQuestion(text, cacheKey)`. Provider calls have deadlines, no automatic retry, and conservative call caps. Root owns this file.
+
+## Validation goals
+
+Real source upload, quote provenance, evidence-checker veto, bounded tool execution, saved/reloaded sessions, simultaneous submit protection, microphone denial and editable transcription, unconfigured/failing provider states, complete guided demo, mobile layout, keyboard access, and real live API checks within the previously approved modest budget.

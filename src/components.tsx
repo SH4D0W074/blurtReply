@@ -1,98 +1,61 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useReducedMotion } from 'motion/react';
-import { AlertCircle, ArrowLeft, ArrowRight, Check, LoaderCircle, Radio, RefreshCw, X } from 'lucide-react';
-import QRCode from 'qrcode';
-import type { AnswerCard as AnswerCardData, Choice, RoomPhase } from '../shared/types';
+import { AlertCircle, ArrowRight, Check, FileText, LoaderCircle, Radio, X } from 'lucide-react';
+import type { AgentEvent, Feedback, SourceExcerpt, Turn } from '../shared/types';
 
-export function Wordmark({ dark = false, small = false }: { dark?: boolean; small?: boolean }) {
-  return <Link to="/" className={`wordmark ${dark ? 'wordmark--light' : ''} ${small ? 'wordmark--small' : ''}`} aria-label="Pairwise home">
-    <svg className="brand-symbol" width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M5 5.5h8v19H5zM17 5.5h8v19h-8z" fill="currentColor" /><path d="M11 12h8v6h-8z" fill="var(--accent)" /></svg>
-    <span>pairwise<span className="wordmark-dot">.</span></span>
-  </Link>;
+export function Brand({ compact = false }: { compact?: boolean }) {
+  return <Link className={`brand ${compact ? 'brand--compact' : ''}`} to="/" aria-label="VivaCoach home"><svg viewBox="0 0 36 36" width="32" height="32" fill="none" aria-hidden="true"><path d="m5 11 11 19h4l11-19" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" /><path d="M13 8v10m5-14v17m5-13v10" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" /></svg><span>VivaCoach<span className="brand-period">.</span></span></Link>;
+}
+export function Spinner({ size = 17 }: { size?: number }) { return <LoaderCircle size={size} className="spinner" aria-hidden="true" />; }
+export function Badge({ children, accent = false }: { children: ReactNode; accent?: boolean }) { return <span className={`badge ${accent ? 'badge--accent' : ''}`}>{children}</span>; }
+export function ErrorNotice({ children }: { children: ReactNode }) { return children ? <div className="error-notice" role="alert"><AlertCircle size={17} /><span>{children}</span></div> : null; }
+export function ConnectionNotice({ connected }: { connected: boolean }) { return connected ? null : <div className="connection-notice" role="status"><Radio size={16} /> Reconnecting. Your draft and the last saved practice are still here.</div>; }
+export function LoadingPage({ label = 'Opening your rehearsal…' }: { label?: string }) { return <div className="state-page"><Brand /><main id="main-content"><Spinner size={25} /><p>{label}</p></main></div>; }
+export function ErrorPage({ message, retry }: { message: string; retry?: () => void }) { return <div className="state-page"><Brand /><main id="main-content"><span className="eyebrow">A small interruption</span><h1>Let’s find your<br /><em>place again.</em></h1><p>{message}</p><div className="button-row">{retry && <button className="button button--accent" onClick={retry}>Try again <ArrowRight size={16} /></button>}<Link className="button button--quiet" to="/">Back to the studio</Link></div></main></div>; }
+
+export function VoiceForm({ level = 0, recording = false, large = false }: { level?: number; recording?: boolean; large?: boolean }) {
+  const strands = useMemo(() => Array.from({ length: 29 }, (_, strand) => {
+    const offset = (strand - 14) / 14;
+    const points = Array.from({ length: 101 }, (_, index) => {
+      const x = 20 + index * 5.6;
+      const position = index / 100;
+      const envelope = Math.sin(position * Math.PI) ** 1.8;
+      const amplitude = 51 + level * 62;
+      const twist = Math.sin(position * Math.PI * (2.25 + level * .8) + offset * 1.4);
+      const y = 140 + envelope * (twist * amplitude + offset * (46 + level * 18) * Math.cos(position * Math.PI * 1.6));
+      return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return { path: points.join(' '), opacity: .2 + (1 - Math.abs(offset)) * .5 };
+  }), [level]);
+  return <div className={`voice-form ${large ? 'voice-form--large' : ''} ${recording ? 'is-listening' : ''}`} aria-hidden="true"><svg viewBox="0 0 600 280" fill="none" preserveAspectRatio="xMidYMid meet"><path d="M0 140H600" className="voice-form__axis" />{strands.map((strand, index) => <path d={strand.path} key={index} stroke="currentColor" strokeWidth={index === 14 ? 1.5 : .85} opacity={strand.opacity} />)}<circle cx="20" cy="140" r="2" fill="currentColor" /><circle cx="580" cy="140" r="2" fill="currentColor" /></svg></div>;
 }
 
-export function Spinner({ size = 18 }: { size?: number }) { return <LoaderCircle size={size} className="spinner" aria-hidden="true" />; }
-
-export function Tag({ children, accent = false }: { children: ReactNode; accent?: boolean }) {
-  return <span className={`tag ${accent ? 'tag--accent' : ''}`}>{children}</span>;
+const agentLabels = { planner: 'Curriculum planner', examiner: 'Examiner', verifier: 'Evidence checker', coach: 'Revision coach' };
+export function AgentActivity({ events, thinking = false }: { events: AgentEvent[]; thinking?: boolean }) {
+  const latest = events.at(-1);
+  const activeId = thinking && latest?.state === 'working' ? latest.id : null;
+  return <div className="agent-activity"><div className="inspector-heading"><span className="eyebrow">Agent handoffs</span>{thinking && <Spinner size={14} />}</div>{!events.length ? <p className="inspector-empty">{thinking ? 'Your practice is being prepared. Agent activity will appear as it happens.' : 'The next handoff will appear after you submit an answer.'}</p> : <ol className="agent-events">{events.slice(-7).map(event => <li className={`agent-event agent-event--${event.id === activeId ? 'working' : event.state === 'working' ? 'started' : event.state}`} key={event.id}><span className="agent-event__mark">{event.id === activeId ? <Spinner size={12} /> : event.state === 'complete' ? <Check size={11} /> : <span />}</span><div><span className="agent-event__name">{agentLabels[event.agent]}<span>{event.id === activeId ? 'Working' : event.state === 'working' ? 'Started' : event.state === 'complete' ? 'Complete' : event.state === 'limited' ? 'Limited' : 'Interrupted'}</span></span><strong>{event.label}</strong>{event.detail && <p>{event.detail}</p>}{event.sourceIds.length > 0 && <small>{event.sourceIds.length} source {event.sourceIds.length === 1 ? 'excerpt' : 'excerpts'} referenced</small>}</div></li>)}</ol>}</div>;
 }
 
-export function InlineError({ children }: { children: ReactNode }) {
-  if (!children) return null;
-  return <div className="inline-error" role="alert"><AlertCircle size={17} /><span>{children}</span></div>;
+const assessments: Record<Feedback['assessment'], string> = { supported: 'Supported by your material', partial: 'Partly supported', revisit: 'Worth revisiting', unclear: 'A clarification would help' };
+export function Evidence({ turn, sources, openSource }: { turn: Turn; sources: SourceExcerpt[]; openSource: (source: SourceExcerpt, quote?: string) => void }) {
+  const feedback = turn.feedback;
+  const source = sources.find(excerpt => excerpt.id === feedback.sourceId);
+  return <div className="evidence"><div className="evidence__status"><span className="status-dot" />{assessments[feedback.assessment]}</div><p className="evidence__observation">{feedback.observation}</p>{feedback.claimQuote && <div className="evidence-quote"><span className="eyebrow">The claim in your answer</span><blockquote>“{feedback.claimQuote}”</blockquote></div>}{feedback.sourceQuote && <div className="evidence-quote evidence-quote--source"><span className="eyebrow">The passage in your material</span><blockquote>“{feedback.sourceQuote}”</blockquote>{source && <button className="source-link" onClick={() => openSource(source, feedback.sourceQuote ?? undefined)}><FileText size={13} />{source.label}{source.page ? ` · p. ${source.page}` : ''}<ArrowRight size={13} /></button>}</div>}<div className="evidence__followup"><span className="eyebrow">The next question</span><p>{feedback.followUp}</p></div><div className="evidence__provenance"><span>{feedback.source === 'demo' ? 'Authored demo feedback' : feedback.source === 'fallback' ? 'Fallback feedback · no AI judgement' : 'Live AI feedback'}</span><span>{feedback.reviewStatus === 'checked' ? 'Evidence checked' : feedback.reviewStatus === 'needs-review' ? 'Needs review' : 'Evidence check unavailable'}</span></div></div>;
 }
 
-export function ConnectionNotice({ connected, dark = false }: { connected: boolean; dark?: boolean }) {
-  if (connected) return null;
-  return <div className={`connection-notice ${dark ? 'connection-notice--dark' : ''}`} role="status"><Radio size={16} /> Reconnecting. The last received state is still shown.</div>;
+export function SourceDialog({ source, quote, onClose }: { source: SourceExcerpt; quote?: string; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  const quoteIndex = quote ? source.text.indexOf(quote) : -1;
+  return <dialog className="source-dialog" ref={ref} aria-label={source.label} onCancel={onClose} onClick={event => { if (event.currentTarget === event.target) onClose(); }}><div className="dialog-content"><button className="icon-button dialog-close" onClick={onClose} aria-label="Close source"><X size={21} /></button><span className="eyebrow">Your source material{source.page ? ` / Page ${source.page}` : ''}</span><h2>{source.label}</h2><div className="source-text">{quote && quoteIndex >= 0 ? <>{source.text.slice(0, quoteIndex)}<mark>{quote}</mark>{source.text.slice(quoteIndex + quote.length)}</> : source.text}</div></div></dialog>;
 }
-
-export function LoadingScreen({ label = 'Opening the room…', dark = false }: { label?: string; dark?: boolean }) {
-  return <main className={`state-screen ${dark ? 'state-screen--dark' : ''}`}><Wordmark dark={dark} /><div className="state-screen__message"><Spinner size={25} /><p>{label}</p></div></main>;
+export function ConfirmDialog({ title, children, confirm, onConfirm, onClose }: { title: string; children: ReactNode; confirm: string; onConfirm: () => void; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  return <dialog ref={ref} className="confirm-dialog" aria-label={title} onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}><div className="dialog-content"><button className="icon-button dialog-close" onClick={onClose} aria-label="Keep practising"><X size={21} /></button><span className="eyebrow">Your practice, your pace</span><h2>{title}</h2><p>{children}</p><div className="button-row"><button className="button button--accent" onClick={onConfirm}>{confirm}<ArrowRight size={17} /></button><button className="button button--quiet" onClick={onClose}>Keep practising</button></div></div></dialog>;
 }
-
-export function ErrorScreen({ message, retry, dark = false }: { message: string; retry?: () => void; dark?: boolean }) {
-  return <main className={`state-screen ${dark ? 'state-screen--dark' : ''}`}><Wordmark dark={dark} /><div className="state-screen__message"><span className="eyebrow">A little interruption</span><h1>Let’s find your room.</h1><p>{message}</p><div className="button-row">{retry && <button className="button button--accent" onClick={retry}><RefreshCw size={17} /> Try again</button>}<Link to="/" className="button button--quiet"><ArrowLeft size={17} /> Back to Pairwise</Link></div></div></main>;
-}
-
-const flow = [
-  { label: 'Think', phases: ['collecting', 'analysing'] },
-  { label: 'Reveal', phases: ['review'] },
-  { label: 'Discuss', phases: ['discussion'] },
-  { label: 'Try again', phases: ['retest', 'results', 'closed'] },
-];
-
-export function SessionProgress({ phase }: { phase: RoomPhase }) {
-  const current = flow.findIndex(item => item.phases.includes(phase));
-  return <ol className="session-progress" aria-label="Session progress">{flow.map((step, index) => <li key={step.label} className={`${index === current ? 'is-current' : ''} ${index < current ? 'is-complete' : ''}`} aria-current={index === current ? 'step' : undefined}><span className="session-progress__number">{index < current ? <Check size={12} /> : String(index + 1).padStart(2, '0')}</span><span>{step.label}</span>{index < flow.length - 1 && <span className="session-progress__line" />}</li>)}</ol>;
-}
-
-export function RoomQr({ url, size = 112 }: { url: string; size?: number }) {
-  const [src, setSrc] = useState('');
-  useEffect(() => {
-    let active = true;
-    QRCode.toDataURL(url, { width: size * 2, margin: 1, color: { dark: '#18201C', light: '#F5F2E9' } }).then(value => { if (active) setSrc(value); }).catch(() => {});
-    return () => { active = false; };
-  }, [url, size]);
-  return src ? <img className="room-qr" src={src} width={size} height={size} alt="QR code to join this room" /> : null;
-}
-
-export function AnswerCard({ card, choices, revealed, compact = false }: { card: AnswerCardData; choices: Choice[]; revealed: boolean; compact?: boolean }) {
-  const reduce = useReducedMotion();
-  const [reading, setReading] = useState(false);
-  const choice = choices.find(option => option.id === card.choiceId);
-  useEffect(() => { if (!revealed) setReading(false); }, [revealed]);
-  return <motion.article layout layoutId={`answer-${card.responseId}`} transition={{ duration: reduce ? 0 : 0.36, ease: [0.22, 1, 0.36, 1] }} className={`answer-object ${revealed ? 'is-revealed' : ''} ${compact ? 'answer-object--compact' : ''}`}>
-    <div className="answer-object__turn">
-      <div className="answer-object__face answer-object__front" aria-hidden={revealed}>
-        <span className="answer-object__alias">{card.alias}</span>
-        <span className="answer-object__letter">{choice?.label ?? card.choiceId}</span>
-        <span className="answer-object__choice">{choice?.text ?? 'Response received'}</span>
-        {card.isDemo && <span className="answer-object__fixture">Example</span>}
-      </div>
-      <div className="answer-object__face answer-object__back" aria-hidden={!revealed}>
-        <div className="answer-object__top"><span className="answer-object__alias">{card.alias}</span><span className="answer-object__small-letter">{choice?.label ?? card.choiceId}</span></div>
-        <p className="answer-object__reason">“{card.reason ?? 'This explanation has not been shared yet.'}”</p>
-        <div className="answer-object__footer"><span className="answer-object__fixture">{card.isDemo ? 'Example response' : 'Their own words'}</span><button className="answer-object__read" tabIndex={revealed ? 0 : -1} onClick={() => setReading(true)} aria-label={`Read ${card.alias}’s complete explanation`}>Read in full <ArrowRight size={12} /></button></div>
-      </div>
-    </div>
-    {reading && revealed && <ReadingDialog card={card} choice={choice} onClose={() => setReading(false)} />}
-  </motion.article>;
-}
-
-function ReadingDialog({ card, choice, onClose }: { card: AnswerCardData; choice?: Choice; onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className="reading-dialog" aria-label={`${card.alias}’s complete explanation`} onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}><div className="reading-dialog__content"><button className="icon-button reading-dialog__close" onClick={onClose} aria-label="Close explanation"><X size={21} /></button><span className="eyebrow">{card.alias} / {card.isDemo ? 'Authored example response' : 'Their own words'}</span><p className="reading-dialog__choice">{choice?.label ?? card.choiceId}<span>{choice?.text}</span></p><blockquote>“{card.reason}”</blockquote></div></dialog>;
-}
-
-export function EmptyResponses({ dark = false }: { dark?: boolean }) {
-  return <div className={`empty-responses ${dark ? 'empty-responses--dark' : ''}`}><div className="empty-response-symbol" aria-hidden="true"><span /><span /><span /></div><h3>There’s more behind an answer.</h3><p>Responses will appear here as people share their thinking.</p></div>;
-}
-
-export function ConfirmDialog({ title, children, confirmLabel, onConfirm, onClose }: { title: string; children: ReactNode; confirmLabel: string; onConfirm: () => void; onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className="confirm-dialog" aria-label={title} onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}><div className="confirm-dialog__content"><button className="icon-button confirm-dialog__close" onClick={onClose} aria-label="Cancel"><X size={20} /></button><span className="eyebrow">Before you continue</span><h2>{title}</h2><p>{children}</p><div className="button-row"><button className="button button--accent" onClick={onConfirm}>{confirmLabel}<ArrowRight size={17} /></button><button className="button button--quiet" onClick={onClose}>Keep this session</button></div></div></dialog>;
+export function Toast({ message, close }: { message: string | null; close: () => void }) {
+  useEffect(() => { if (!message) return; const timer = window.setTimeout(close, 6500); return () => window.clearTimeout(timer); }, [message, close]);
+  return message ? <div className="toast" role="status"><Check size={17} /><span>{message}</span><button className="icon-button" onClick={close} aria-label="Dismiss notification"><X size={16} /></button></div> : null;
 }

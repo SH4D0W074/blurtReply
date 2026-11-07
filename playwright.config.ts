@@ -12,7 +12,7 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     ...devices['Desktop Chrome'],
-    channel: process.env.PAIRWISE_BROWSER_CHANNEL || undefined,
+    channel: process.env.VIVACOACH_BROWSER_CHANNEL || undefined,
     baseURL: 'http://localhost:4173',
     viewport: { width: 1440, height: 1000 },
     reducedMotion: 'reduce',
@@ -26,10 +26,11 @@ export default defineConfig({
     timeout: 30_000,
     env: {
       PORT: '4173',
-      HOST: '127.0.0.1',
-      PAIRWISE_LIVE_AI: 'false',
+      VIVACOACH_HOST: '127.0.0.1',
+      VIVACOACH_LIVE_AI: 'false',
       OPENAI_API_KEY: '',
-      PAIRWISE_DATABASE_PATH: join(tmpdir(), `pairwise-e2e-${process.pid}.sqlite`),
+      ELEVENLABS_API_KEY: '',
+      VIVACOACH_DB_PATH: join(tmpdir(), `vivacoach-e2e-${process.pid}.sqlite`),
     },
   },
 });

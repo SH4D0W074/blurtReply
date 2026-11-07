@@ -1,8 +1,8 @@
-name: Check Pairwise
+name: Check VivaCoach
 
 on:
   push:
-    branches: [main]
+    branches: [main, vivacoach]
     paths-ignore: ['README.md', 'docs/**']
   pull_request:
     paths-ignore: ['README.md', 'docs/**']
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      PAIRWISE_LIVE_AI: 'false'
+      VIVACOACH_LIVE_AI: 'false'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

@@ -1,428 +1,366 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { request as httpRequest, type Server } from 'node:http';
-import { createHash } from 'node:crypto';
+import { type Server, request as httpRequest } from 'node:http';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp, type AppOptions } from '../server/app';
 import { Store } from '../server/store';
-import type { Analyse } from '../server/rooms';
-import { LESSONS } from '../shared/lessons';
-import type { Analysis, RoomSnapshot } from '../shared/types';
+import { PracticeService } from '../server/practices';
+import type { CourseContent, Feedback, PracticeMode, PracticeReview, PracticeSession } from '../shared/types';
 
-const lesson = LESSONS[0];
-type ApiResult = { status: number; data: any; headers: Headers };
+const sourceText = 'A representative sample includes the relevant population. Sampling variation can decrease with a larger independent sample. Recruitment bias is not removed merely by increasing sample size.';
+const course: CourseContent = {
+  title: 'Sampling concepts', subject: 'Statistics', sourceName: 'Test course notes', origin: 'paste',
+  excerpts: [{ id: 'source-1', label: 'Course notes', text: sourceText }],
+  concepts: [0, 1, 2].map(index => ({ id: `concept-${index + 1}`, title: `Sampling idea ${index + 1}`,
+    sourceId: 'source-1', sourceQuote: sourceText, openingQuestion: `Explain sampling idea ${index + 1} in your own words.` })),
+};
+const feedback: Feedback = {
+  assessment: 'partial', claimQuote: 'My explanation.', sourceId: 'source-1', sourceQuote: sourceText,
+  observation: 'A fixture observation.', followUp: 'How would your explanation change for a new population?',
+  followUpKind: 'transfer', source: 'demo', reviewStatus: 'checked',
+};
+const review: PracticeReview = { strengths: [], revisit: [], nextSteps: [], source: 'demo', note: 'A labelled fixture review.' };
+const stubs: AppOptions = {
+  prepareCourse: async (_input, _mode, emit) => {
+    emit({ agent: 'planner', state: 'complete', label: 'Prepared fixture concepts', sourceIds: ['source-1'] });
+    return structuredClone(course);
+  },
+  reviewAnswer: async (_course, _question, answer, _turns, _mode, emit) => {
+    emit({ agent: 'examiner', state: 'complete', label: 'Fixture examiner proposal', sourceIds: ['source-1'] });
+    emit({ agent: 'verifier', state: 'complete', label: 'Fixture evidence check', sourceIds: ['source-1'] });
+    return { ...feedback, claimQuote: answer };
+  },
+  createReview: async (_course, _turns, _mode, emit) => {
+    emit({ agent: 'coach', state: 'complete', label: 'Fixture revision review', sourceIds: [] });
+    return structuredClone(review);
+  },
+  getTextAIStatus: () => ({ aiConfigured: false, aiEnabled: false, model: 'test-only', remainingTextCalls: 0 }),
+  getVoiceStatus: () => ({ transcriptionAvailable: false, transcriptionModel: 'test-only', remainingTranscriptions: 0, voiceProvider: 'device', remainingVoiceCalls: 0 }),
+  transcribeAudio: async () => ({ text: 'An editable transcript.', model: 'test-only' }),
+  speakQuestion: async () => Buffer.from('mock-mp3'),
+};
+
 class Browser {
   cookie = '';
-  constructor(readonly baseUrl: string) {}
-  async request(method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<ApiResult> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method, headers: { ...(this.cookie ? { Cookie: this.cookie } : {}),
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders },
+  constructor(readonly base: string) {}
+  async request(method: string, path: string, body?: unknown, extra: Record<string, string> = {}) {
+    const response = await fetch(this.base + path, { method,
+      headers: { ...(this.cookie ? { Cookie: this.cookie } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...extra },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const cookie = response.headers.get('set-cookie');
     if (cookie) this.cookie = cookie.split(';')[0];
-    return { status: response.status, data: await response.json(), headers: response.headers };
+    return { status: response.status, headers: response.headers, data: await response.json() as any };
   }
   get(path: string) { return this.request('GET', path); }
   post(path: string, body: unknown) { return this.request('POST', path, body); }
+  async audio(path: string, bytes: Buffer, mime = 'audio/webm') {
+    const response = await fetch(this.base + path, { method: 'POST',
+      headers: { Cookie: this.cookie, 'Content-Type': mime }, body: new Uint8Array(bytes) });
+    return { status: response.status, data: await response.json() as any };
+  }
 }
 
 const cleanups: (() => Promise<void> | void)[] = [];
+const releases: (() => void)[] = [];
+function gate() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  releases.push(resolve);
+  return { promise, resolve };
+}
 async function fixture(options: AppOptions = {}) {
   const store = options.store ?? new Store(':memory:');
-  const app = createApp({ ...options, store });
-  const server = await new Promise<Server>(resolve => {
-    const running = app.listen(0, '127.0.0.1', () => resolve(running));
-  });
+  const app = createApp({ ...stubs, ...options, store });
+  const service = app.locals.practices as PracticeService;
+  const server = await new Promise<Server>(resolve => { const running = app.listen(0, '127.0.0.1', () => resolve(running)); });
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('No test address');
-  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const base = `http://127.0.0.1:${address.port}`;
   let closed = false;
   const close = async () => {
     if (closed) return;
     closed = true;
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await service.idle();
+    await new Promise<void>(resolve => server.close(() => resolve()));
     store.close();
   };
   cleanups.push(close);
-  return { store, baseUrl, browser: () => new Browser(baseUrl), close };
+  return { store, service, base, close, browser: () => new Browser(base) };
 }
-async function createRoom(host: Browser, mode: 'demo' | 'live' = 'live'): Promise<RoomSnapshot> {
-  const result = await host.post('/api/rooms', { lessonId: lesson.id, mode });
+async function create(browser: Browser, service: PracticeService, mode: PracticeMode = 'demo') {
+  const result = await browser.post('/api/practices', { mode, text: sourceText, title: course.title, origin: 'paste' });
   expect(result.status).toBe(201);
-  return result.data;
+  expect(result.data.phase).toBe('thinking');
+  await service.idle();
+  return (await browser.get(`/api/practices/${result.data.id}`)).data as PracticeSession;
 }
-async function joinAndAnswer(browser: Browser, code: string, reason = 'Recruiting only club members still excludes other students.') {
-  const joined = await browser.post(`/api/rooms/${code}/join`, {});
-  expect(joined.status).toBe(200);
-  const answer = { stage: 'initial', choiceId: lesson.initial.options[0].id, reason };
-  const submitted = await browser.post(`/api/rooms/${code}/responses`, answer);
-  expect(submitted.status).toBe(200);
-  return { participant: submitted.data.self.participant, answer, snapshot: submitted.data as RoomSnapshot };
-}
-const action = (host: Browser, code: string, name: string, version?: number) =>
-  host.post(`/api/rooms/${code}/actions`, { action: name, ...(version === undefined ? {} : { version }) });
+const answerInput = (session: PracticeSession, answer = 'My explanation.') => ({ questionId: session.currentQuestion!.id, answer, idempotencyKey: randomUUID() });
 
-beforeEach(() => {
-  vi.stubEnv('PAIRWISE_LIVE_AI', 'false');
-  vi.stubEnv('OPENAI_API_KEY', '');
-});
+beforeEach(() => { vi.stubEnv('VIVACOACH_LIVE_AI', 'false'); vi.stubEnv('OPENAI_API_KEY', ''); vi.stubEnv('ELEVENLABS_API_KEY', ''); });
 afterEach(async () => {
+  for (const release of releases.splice(0)) release();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   vi.unstubAllEnvs();
 });
 
-describe('anonymous ownership and privacy', () => {
-  it('never creates or replaces identity cookies on public reads or unauthorised mutations', async () => {
+describe('local ownership and request privacy', () => {
+  it('allocates identity only on creation and keeps practices private to the original browser', async () => {
     const f = await fixture();
-    const guest = f.browser();
-    // Home starts both requests together. Neither late response may overwrite a newer host cookie.
-    const publicReads = await Promise.all([guest.get('/api/status'), guest.get('/api/lessons')]);
-    expect(publicReads.every(result => result.status === 200 && !result.headers.has('set-cookie'))).toBe(true);
-    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM sessions')!.count).toBe(0);
-
-    const host = f.browser();
-    const room = await createRoom(host);
-    const hostCookie = host.cookie;
-    const latePublicRead = await guest.get('/api/status');
-    expect(latePublicRead.headers.has('set-cookie')).toBe(false);
-    expect((await host.get(`/api/rooms/${room.code}?view=host`)).status).toBe(200);
-    expect(host.cookie).toBe(hostCookie);
-
-    for (const view of ['student', 'board']) {
-      const snapshot = await guest.get(`/api/rooms/${room.code}?view=${view}`);
-      expect(snapshot.status).toBe(200);
-      expect(snapshot.headers.has('set-cookie')).toBe(false);
-      expect(snapshot.data.self).toBeNull();
-      expect(snapshot.data.isHost).toBe(false);
-      expect(snapshot.data).not.toHaveProperty('host');
-    }
-    expect((await guest.get(`/api/rooms/${room.code}?view=host`)).status).toBe(403);
-    const forbidden = await Promise.all([
-      guest.post(`/api/rooms/${room.code}/actions`, { action: 'close' }),
-      guest.post(`/api/rooms/${room.code}/responses`, { stage: 'initial', choiceId: lesson.initial.options[0].id, reason: 'A guest cannot submit.' }),
-      guest.post(`/api/rooms/${room.code}/clarification`, { text: 'A guest cannot clarify.' }),
-    ]);
-    expect(forbidden.every(result => result.status === 403 && !result.headers.has('set-cookie'))).toBe(true);
-    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM sessions')!.count).toBe(1);
-
-    guest.cookie = 'pairwise_session=invalid';
-    expect((await guest.get('/api/status')).headers.has('set-cookie')).toBe(false);
-    const joined = await guest.post(`/api/rooms/${room.code}/join`, {});
-    expect(joined.status).toBe(200);
-    expect(joined.headers.has('set-cookie')).toBe(true);
-    expect((await guest.get(`/api/rooms/${room.code}?view=student`)).data.self.participant.id)
-      .toBe(joined.data.self.participant.id);
-    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM sessions')!.count).toBe(2);
+    const owner = f.browser();
+    const reads = await Promise.all(['/api/status', '/api/samples', '/api/practices'].map(path => owner.get(path)));
+    expect(reads.every(result => result.status === 200 && !result.headers.has('set-cookie'))).toBe(true);
+    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM identities')!.count).toBe(0);
+    const session = await create(owner, f.service);
+    const token = owner.cookie.split('=')[1];
+    const identity = f.store.get<{ token_hash: string }>('SELECT token_hash FROM identities')!;
+    expect(identity.token_hash).toBe(createHash('sha256').update(token).digest('hex'));
+    const stranger = f.browser();
+    expect((await stranger.get('/api/practices')).data).toEqual([]);
+    expect((await stranger.get(`/api/practices/${session.id}`)).status).toBe(404);
+    expect((await stranger.post(`/api/practices/${session.id}/answers`, answerInput(session))).status).toBe(404);
+    expect((await stranger.post(`/api/practices/${session.id}/finish`, {})).status).toBe(404);
+    expect(stranger.cookie).toBe('');
+    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM identities')!.count).toBe(1);
+    const ownReads = await Promise.all([owner.get('/api/status'), owner.get(`/api/practices/${session.id}`)]);
+    expect(ownReads.every(result => !result.headers.has('set-cookie'))).toBe(true);
+    expect((await owner.get('/api/practices')).data[0].id).toBe(session.id);
+    expect(JSON.stringify(session)).not.toMatch(/owner_id|token_hash|input_json|operation_token/);
   });
 
-  it('uses a hashed HttpOnly session, rejoins one identity, and rejects host impersonation', async () => {
-    const f = await fixture();
-    const host = f.browser();
-    const creation = await host.post('/api/rooms', { lessonId: lesson.id, mode: 'live' });
-    const room = creation.data as RoomSnapshot;
-    expect(creation.headers.get('set-cookie')).toMatch(/HttpOnly/i);
-    expect(creation.headers.get('set-cookie')).toMatch(/SameSite=Lax/i);
-    const token = host.cookie.split('=')[1];
-    const sessions = f.store.all<{ token_hash: string }>('SELECT token_hash FROM sessions');
-    expect(sessions).toHaveLength(1);
-    expect(sessions[0].token_hash).toBe(createHash('sha256').update(token).digest('hex'));
-    expect(JSON.stringify(sessions)).not.toContain(token);
-
-    const student = f.browser();
-    const first = await student.post(`/api/rooms/${room.code}/join`, {});
-    const rejoined = await student.post(`/api/rooms/${room.code}/join`, {});
-    expect(rejoined.data.self.participant.id).toBe(first.data.self.participant.id);
-    expect(rejoined.data.participantCount).toBe(1);
-    expect((await student.get(`/api/rooms/${room.code}?view=host`)).status).toBe(403);
-    expect((await action(student, room.code, 'reveal')).status).toBe(403);
-    expect((await student.post(`/api/rooms/${room.code}/join`, { isDemo: true })).status).toBe(400);
-  });
-
-  it('redacts keys and diagnostics on the board, including for the owner, until explicit reasoning reveal', async () => {
-    const f = await fixture();
-    const host = f.browser();
-    const room = await createRoom(host, 'demo');
-    expect(room.initialCount).toBe(lesson.demoResponses.length);
-    const lessons = await host.get('/api/lessons');
-    for (const item of lessons.data) {
-      expect(item).not.toHaveProperty('initialExpectedChoiceId');
-      expect(item).not.toHaveProperty('transferExpectedChoiceId');
-      expect(item).not.toHaveProperty('demoResponses');
-      expect(item).not.toHaveProperty('categories');
-      expect(item).not.toHaveProperty('probes');
-    }
-    const analysed = await action(host, room.code, 'analyse');
-    expect(analysed.status).toBe(200);
-    expect(analysed.data.host.responses.some((response: any) => response.analysis?.source === 'demo')).toBe(true);
-    const board = await host.get(`/api/rooms/${room.code}?view=board`);
-    expect(board.data.isHost).toBe(false);
-    expect(board.data.self).toBeNull();
-    expect(board.data).not.toHaveProperty('host');
-    expect(board.data.cards.every((card: any) => card.reason === null && !('analysis' in card))).toBe(true);
-    expect(board.data.pairings).toEqual([]);
-    await action(host, room.code, 'reveal');
-    await action(host, room.code, 'publish-pairs');
-    const revealed = await host.get(`/api/rooms/${room.code}?view=board`);
-    expect(revealed.data.cards.every((card: any) => typeof card.reason === 'string' && !('analysis' in card))).toBe(true);
-    expect(revealed.data.pairings.every((pair: any) => pair.rationale === '' && pair.kind !== 'contrast')).toBe(true);
-    expect(JSON.stringify(revealed.data)).not.toContain('owner_session_id');
-  });
-
-  it('rejects cross-origin, non-JSON and invalid submissions without returning secrets', async () => {
+  it('rejects cross-origin actions, hostile hosts, private source paths and excessive input', async () => {
     const f = await fixture();
     const browser = f.browser();
-    const origin = await browser.request('POST', '/api/rooms', { lessonId: lesson.id, mode: 'live' }, { Origin: 'https://example.invalid' });
-    expect(origin.status).toBe(403);
-    const form = await fetch(`${f.baseUrl}/api/rooms`, { method: 'POST', body: 'mode=demo', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-    expect(form.status).toBe(415);
-    // Fetch normalises the Host header; use the HTTP client to exercise an actual hostile Host.
-    const rebindingStatus = await new Promise<number | undefined>((resolve, reject) => {
-      const request = httpRequest(`${f.baseUrl}/api/status`, { headers: { Host: 'example.invalid' } }, response => {
-        response.resume();
-        response.on('end', () => resolve(response.statusCode));
+    const input = { mode: 'demo', text: sourceText };
+    expect((await browser.request('POST', '/api/practices', input, { Origin: 'https://example.invalid' })).status).toBe(403);
+    expect((await browser.post('/api/practices', { ...input, text: 'x'.repeat(30_001) })).status).toBe(400);
+    expect((await browser.post('/api/practices', { ...input, sampleId: 'also-a-sample' })).status).toBe(400);
+    expect((await browser.post('/api/practices', { mode: 'demo', sampleId: 'not-a-sample' })).status).toBe(400);
+    expect(browser.cookie).toBe('');
+    const hostStatus = await new Promise<number | undefined>((resolve, reject) => {
+      const request = httpRequest(`${f.base}/api/status`, { headers: { Host: 'example.invalid' } }, response => {
+        response.resume(); response.on('end', () => resolve(response.statusCode));
       });
-      request.on('error', reject);
-      request.end();
+      request.on('error', reject); request.end();
     });
-    expect(rebindingStatus).toBe(403);
-    const status = await browser.get('/api/status');
-    expect(status.data.aiEnabled).toBe(false);
-    expect(status.data.storage).toBe('sqlite');
-    expect(status.data.localOnly).toBe(true);
-    expect(status.data).not.toHaveProperty('apiKey');
-    for (const path of [
-      '/shared/lessons.ts', '/server/analysis.ts', '/.env.local', '/.local/pairwise.sqlite',
-      '/@fs/private/project/shared/lessons.ts', '/shared/%6cessons.ts?raw', '/%73erver/analysis.ts',
-      '/%2eenv.local', '/.local%2fpairwise.sqlite', '/%2573erver/analysis.ts',
-      '/@fs/private/project/src/%252e%252e/shared/lessons.ts',
-    ]) {
+    expect(hostStatus).toBe(403);
+    for (const path of ['/server/agents.ts', '/%73erver/agents.ts', '/%2573erver/courses.ts', '/.env.local', '/%2eenv.local', '/.local/vivacoach.sqlite', '/@fs/private/project/server/courses.ts', '/tests/server.test.ts']) {
       expect((await browser.get(path)).status).toBe(404);
     }
+    const session = await create(browser, f.service);
+    expect((await browser.post(`/api/practices/${session.id}/answers`, answerInput(session, 'x'.repeat(2501)))).status).toBe(400);
+    expect((await browser.get(`/api/practices/${session.id}`)).data.turns).toEqual([]);
   });
 });
 
-describe('room state and independent responses', () => {
-  it('keeps duplicate submissions idempotent and rejects late, changed or invalid answers', async () => {
-    const f = await fixture();
-    const host = f.browser();
-    const room = await createRoom(host);
-    const student = f.browser();
-    const { answer, participant } = await joinAndAnswer(student, room.code);
-    const duplicates = await Promise.all([
-      student.post(`/api/rooms/${room.code}/responses`, answer),
-      student.post(`/api/rooms/${room.code}/responses`, answer),
-    ]);
-    expect(duplicates.every(result => result.status === 200 && result.data.initialCount === 1)).toBe(true);
-    const changed = await student.post(`/api/rooms/${room.code}/responses`, { ...answer, reason: 'Changed after submission.' });
-    expect(changed.status).toBe(409);
-    const waiting = f.browser();
-    await waiting.post(`/api/rooms/${room.code}/join`, {});
-    const invalid = await waiting.post(`/api/rooms/${room.code}/responses`, { ...answer, choiceId: 'not-an-option' });
-    expect(invalid.status).toBe(400);
-    await action(host, room.code, 'fallback-pairs');
-    expect((await waiting.post(`/api/rooms/${room.code}/responses`, answer)).status).toBe(409);
-    expect((await student.post(`/api/rooms/${room.code}/responses`, answer)).status).toBe(200);
-    const newBrowser = f.browser();
-    expect((await newBrowser.post(`/api/rooms/${room.code}/join`, {})).status).toBe(409);
-    const rejoined = await student.post(`/api/rooms/${room.code}/join`, {});
-    expect(rejoined.data.self.participant.id).toBe(participant.id);
+describe('six-question state machine and visible work', () => {
+  it('returns preparation immediately and exposes only actual emitted planner events', async () => {
+    const wait = gate();
+    const f = await fixture({ prepareCourse: async (_input, _mode, emit) => {
+      emit({ agent: 'planner', state: 'working', label: 'Reading supplied excerpts', sourceIds: [] });
+      await wait.promise;
+      emit({ agent: 'planner', state: 'complete', label: 'Three concepts prepared', sourceIds: ['source-1'] });
+      return structuredClone(course);
+    } });
+    const owner = f.browser();
+    const result = await owner.post('/api/practices', { mode: 'live', text: sourceText });
+    expect(result.status).toBe(201);
+    expect(result.data.currentQuestion).toBeNull();
+    const thinking = (await owner.get(`/api/practices/${result.data.id}`)).data as PracticeSession;
+    expect(thinking.phase).toBe('thinking');
+    expect(thinking.course.excerpts[0].text).toBe(sourceText);
+    expect(thinking.events.map(event => event.label)).toEqual(['Reading supplied excerpts']);
+    wait.resolve(); await f.service.idle();
+    const ready = (await owner.get(`/api/practices/${result.data.id}`)).data as PracticeSession;
+    expect(ready.phase).toBe('ready');
+    expect(ready.currentQuestion).toMatchObject({ number: 1, conceptId: 'concept-1', kind: 'explain' });
+    expect(ready.events).toHaveLength(2);
+    expect(ready.version).toBeGreaterThan(thinking.version);
   });
 
-  it('completes a live loop with stable pairs, private transfer responses and honest totals', async () => {
-    const f = await fixture();
-    const host = f.browser();
-    const room = await createRoom(host);
-    const students = [f.browser(), f.browser(), f.browser()];
-    const participants = [];
-    for (const [index, student] of students.entries()) participants.push(await joinAndAnswer(student, room.code, `My original explanation ${index}.`));
-    const grouped = await action(host, room.code, 'fallback-pairs');
-    expect(grouped.data.pairings).toHaveLength(1);
-    expect(grouped.data.pairings[0].participantIds).toHaveLength(3);
-    const published = await action(host, room.code, 'publish-pairs', grouped.data.version);
-    expect(published.status).toBe(200);
-    const one = await students[0].get(`/api/rooms/${room.code}?view=student`);
-    const two = await students[1].get(`/api/rooms/${room.code}?view=student`);
-    expect(one.data.self.pairing.id).toBe(two.data.self.pairing.id);
-    const refresh = await students[0].get(`/api/rooms/${room.code}?view=student`);
-    expect(refresh.data.self.pairing.id).toBe(one.data.self.pairing.id);
-    expect((await action(host, room.code, 'publish-pairs', grouped.data.version)).status).toBe(409);
-    const transfer = { stage: 'transfer', choiceId: lesson.transferExpectedChoiceId, reason: 'This later response compares the sampling frame and random uncertainty.' };
-    expect((await students[0].post(`/api/rooms/${room.code}/responses`, transfer)).status).toBe(409);
-    await action(host, room.code, 'start-retest');
-    const submitted = await students[0].post(`/api/rooms/${room.code}/responses`, transfer);
-    expect(submitted.status).toBe(200);
-    const beforeResults = await students[1].get(`/api/rooms/${room.code}?view=student`);
-    expect(beforeResults.data.summary).toBeNull();
-    expect(beforeResults.data.self.transfer).toBeNull();
-    expect(JSON.stringify(beforeResults.data)).not.toContain(transfer.reason);
-    const results = await action(host, room.code, 'show-results');
-    expect(results.data.summary).toMatchObject({ initialTotal: 3, transferTotal: 1, matchedRespondents: 1, transferExpected: 1 });
-    expect(results.data.summary.explanation).toContain('do not establish mastery');
-    const board = await host.get(`/api/rooms/${room.code}?view=board`);
-    expect(board.data.summary.examples).toEqual([]);
-    await action(host, room.code, 'reveal');
-    const revealed = await host.get(`/api/rooms/${room.code}?view=board`);
-    expect(revealed.data.summary.examples[0].after).toBe(transfer.reason);
+  it('runs one opening and adaptive follow-up per concept, then one evidence-linked review', async () => {
+    const coach = vi.fn(stubs.createReview!);
+    const examiner = vi.fn(stubs.reviewAnswer!);
+    const f = await fixture({ createReview: coach, reviewAnswer: examiner });
+    const owner = f.browser();
+    let session = await create(owner, f.service);
+    const questionIds = new Set<string>();
+    for (let number = 1; number <= 6; number++) {
+      const question = session.currentQuestion!;
+      questionIds.add(question.id);
+      expect(question.number).toBe(number);
+      expect(question.conceptId).toBe(`concept-${Math.ceil(number / 2)}`);
+      expect(question.kind).toBe(number % 2 ? 'explain' : 'transfer');
+      if (!(number % 2)) expect(question.text).toBe(feedback.followUp);
+      const result = await owner.post(`/api/practices/${session.id}/answers`, answerInput(session, `My explanation ${number}.`));
+      expect(result.status).toBe(200);
+      expect(result.data.phase).toBe('thinking');
+      expect(result.data.pendingAnswer).toBe(`My explanation ${number}.`);
+      await f.service.idle();
+      session = (await owner.get(`/api/practices/${session.id}`)).data;
+      expect(session.turns).toHaveLength(number);
+    }
+    expect(questionIds.size).toBe(6);
+    expect(session.phase).toBe('complete');
+    expect(session.currentQuestion).toBeNull();
+    expect(session.pendingAnswer).toBeNull();
+    expect(session.review?.source).toBe('demo');
+    expect(examiner).toHaveBeenCalledTimes(6);
+    expect(coach).toHaveBeenCalledTimes(1);
+    expect(coach.mock.calls[0][1]).toHaveLength(6);
+    expect((await owner.post(`/api/practices/${session.id}/finish`, {})).status).toBe(200);
+    expect(coach).toHaveBeenCalledTimes(1);
   });
 
-  it('accepts fresh responses from existing participants who missed round one without inventing matched results', async () => {
-    const f = await fixture();
-    const host = f.browser();
-    const room = await createRoom(host);
-    const both = f.browser();
-    const initialOnly = f.browser();
-    const transferOnly = f.browser();
-    const original = await joinAndAnswer(both, room.code, 'My first explanation, before discussion.');
-    await joinAndAnswer(initialOnly, room.code, 'I will answer only the first question.');
-    const joined = await transferOnly.post(`/api/rooms/${room.code}/join`, {});
-    expect(joined.status).toBe(200);
-    const transfer = { stage: 'transfer', choiceId: lesson.transferExpectedChoiceId, reason: 'My fresh explanation after missing the first round.' };
-    expect((await transferOnly.post(`/api/rooms/${room.code}/responses`, transfer)).status).toBe(409);
-
-    await action(host, room.code, 'fallback-pairs');
-    await action(host, room.code, 'publish-pairs');
-    await action(host, room.code, 'start-retest');
-    const submitted = await transferOnly.post(`/api/rooms/${room.code}/responses`, transfer);
-    expect(submitted.status).toBe(200);
-    expect(submitted.data.self.initial).toBeNull();
-    expect(submitted.data.self.transfer.reason).toBe(transfer.reason);
-    expect((await transferOnly.post(`/api/rooms/${room.code}/responses`, transfer)).data.transferCount).toBe(1);
-    await both.post(`/api/rooms/${room.code}/responses`, { ...transfer, reason: 'My second explanation, with a first response to compare.' });
-    const peer = await initialOnly.get(`/api/rooms/${room.code}?view=student`);
-    expect(JSON.stringify(peer.data)).not.toContain(transfer.reason);
-
-    const results = await action(host, room.code, 'show-results');
-    expect(results.data.summary).toMatchObject({ initialTotal: 2, transferTotal: 2, matchedRespondents: 1, transferExpected: 2 });
-    expect(results.data.summary.examples).toHaveLength(1);
-    expect(results.data.summary.examples[0].before).toBe(original.answer.reason);
-    expect(results.data.summary.examples[0].alias).toBe(original.participant.alias);
-    expect(results.data.host.responses.filter((response: any) => response.participantId === joined.data.self.participant.id))
-      .toHaveLength(1);
-  });
-
-  it('does not fabricate demo responses or transfer results for real participants', async () => {
-    const f = await fixture();
-    const host = f.browser();
-    const room = await createRoom(host, 'demo');
-    const student = f.browser();
-    const fixtureAnswer = lesson.demoResponses[0];
-    await student.post(`/api/rooms/${room.code}/join`, {});
-    await student.post(`/api/rooms/${room.code}/responses`, { stage: 'initial', choiceId: fixtureAnswer.choiceId, reason: fixtureAnswer.reason });
-    const analysed = await action(host, room.code, 'analyse');
-    const realResponse = analysed.data.host.responses.find((response: any) => response.participantId === analysed.data.host.participants.find((participant: any) => !participant.isDemo).id);
-    expect(realResponse.analysis.source).toBe('fallback');
-    await action(host, room.code, 'publish-pairs');
-    await action(host, room.code, 'start-retest');
-    const results = await action(host, room.code, 'show-results');
-    expect(results.data.transferCount).toBe(lesson.demoResponses.length);
-    expect(results.data.initialCount).toBe(lesson.demoResponses.length + 1);
-    expect(results.data.summary.examples.every((example: any) => example.isDemo)).toBe(true);
-    const reset = await action(host, room.code, 'restart-demo');
-    expect(reset.data.phase).toBe('collecting');
-    expect(reset.data.initialCount).toBe(lesson.demoResponses.length);
-    expect(reset.data.transferCount).toBe(0);
-    const rejoined = await student.post(`/api/rooms/${room.code}/join`, {});
-    expect(rejoined.data.self.initial).toBeNull();
-    expect(rejoined.data.self.participant.isDemo).toBe(false);
-  });
-});
-
-describe('analysis and recovery', () => {
-  it('freezes analysis once, rejects overlapping transitions and ignores completion after close', async () => {
-    let resolveAnalysis!: (analyses: Analysis[]) => void;
-    let signalStarted!: () => void;
-    const started = new Promise<void>(resolve => { signalStarted = resolve; });
-    const analyse: Analyse = vi.fn(async () => {
-      signalStarted();
-      return new Promise<Analysis[]>(resolve => { resolveAnalysis = resolve; });
+  it('persists the input before agent work, safely replays duplicates and rejects conflicting or overlapping writes', async () => {
+    const wait = gate();
+    const examiner = vi.fn(async (...args: Parameters<NonNullable<AppOptions['reviewAnswer']>>) => {
+      args[5]({ agent: 'examiner', state: 'working', label: 'Checking the saved answer', sourceIds: [] });
+      await wait.promise;
+      return { ...feedback, claimQuote: args[2] };
     });
-    const f = await fixture({ analyse });
-    const host = f.browser();
-    const room = await createRoom(host);
-    const student = f.browser();
-    await joinAndAnswer(student, room.code);
-    const pending = action(host, room.code, 'analyse', room.version);
-    await started;
-    const running = await host.get(`/api/rooms/${room.code}?view=host`);
-    expect(running.data.phase).toBe('analysing');
-    expect((await action(host, room.code, 'analyse')).status).toBe(409);
-    await action(host, room.code, 'close', running.data.version);
-    resolveAnalysis([]);
-    expect((await pending).data.phase).toBe('closed');
-    const closed = await host.get(`/api/rooms/${room.code}?view=host`);
-    expect(closed.data.pairings).toEqual([]);
-    expect(analyse).toHaveBeenCalledOnce();
+    const f = await fixture({ reviewAnswer: examiner });
+    const owner = f.browser();
+    const session = await create(owner, f.service);
+    const input = answerInput(session);
+    const duplicates = await Promise.all([owner.post(`/api/practices/${session.id}/answers`, input), owner.post(`/api/practices/${session.id}/answers`, input)]);
+    expect(duplicates.every(result => result.status === 200)).toBe(true);
+    expect(examiner).toHaveBeenCalledTimes(1);
+    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM answers')!.count).toBe(1);
+    const saved = f.store.get<{ answer: string; status: string }>('SELECT answer, status FROM answers')!;
+    expect(saved).toEqual({ answer: input.answer, status: 'pending' });
+    const thinking = (await owner.get(`/api/practices/${session.id}`)).data;
+    expect(thinking.pendingAnswer).toBe(input.answer);
+    expect(thinking.events.at(-1).state).toBe('working');
+    expect((await owner.post(`/api/practices/${session.id}/answers`, { ...input, answer: 'A conflicting answer.' })).data.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect((await owner.post(`/api/practices/${session.id}/answers`, { ...input, idempotencyKey: randomUUID() })).data.code).toBe('ALREADY_SUBMITTED');
+    expect((await owner.post(`/api/practices/${session.id}/finish`, {})).data.code).toBe('PRACTICE_BUSY');
+    wait.resolve(); await f.service.idle();
+    const replay = await owner.post(`/api/practices/${session.id}/answers`, input);
+    expect(replay.status).toBe(200);
+    expect(replay.data.turns).toHaveLength(1);
+    expect(replay.data.currentQuestion.number).toBe(2);
+    expect(examiner).toHaveBeenCalledTimes(1);
+    expect((await owner.post(`/api/practices/${session.id}/answers`, { ...input, questionId: randomUUID(), idempotencyKey: randomUUID() })).data.code).toBe('STALE_QUESTION');
   });
 
-  it('invalidates pair previews when clarification is saved and preserves the original answer', async () => {
-    const analyse: Analyse = async (_lesson, responses) => responses.map(response => ({
-      responseId: response.id, categoryId: 'unclear', categoryLabel: 'Needs explanation',
-      quote: response.reason, note: 'A clarification would help.', needsClarification: true,
-      probe: 'What changes when the sample becomes larger?', source: 'fallback',
-    }));
-    const f = await fixture({ analyse });
-    const host = f.browser();
-    const room = await createRoom(host);
-    const student = f.browser();
-    const original = await joinAndAnswer(student, room.code);
-    const reviewed = await action(host, room.code, 'analyse');
-    expect(reviewed.data.pairings).toHaveLength(1);
-    const clarification = await student.post(`/api/rooms/${room.code}/clarification`, { text: 'Random uncertainty can reduce while coverage stays unchanged.' });
-    expect(clarification.status).toBe(200);
-    expect(clarification.data.self.initial.reason).toBe(original.answer.reason);
-    expect(clarification.data.self.initial.clarification).toContain('coverage stays unchanged');
-    expect(clarification.data.self.initial).not.toHaveProperty('analysis');
-    const after = await host.get(`/api/rooms/${room.code}?view=host`);
-    expect(after.data.pairings).toEqual([]);
-    expect((await action(host, room.code, 'publish-pairs', reviewed.data.version)).status).toBe(409);
-    expect((await action(host, room.code, 'publish-pairs', after.data.version)).status).toBe(409);
-    expect((await action(host, room.code, 'analyse', after.data.version)).status).toBe(200);
+  it('finishes early from completed turns and never assesses an empty practice', async () => {
+    const coach = vi.fn(stubs.createReview!);
+    const f = await fixture({ createReview: coach });
+    const owner = f.browser();
+    const empty = await create(owner, f.service);
+    await owner.post(`/api/practices/${empty.id}/finish`, {}); await f.service.idle();
+    const ended = (await owner.get(`/api/practices/${empty.id}`)).data;
+    expect(ended.review.note).toContain('no evidence to assess');
+    expect(coach).not.toHaveBeenCalled();
+    const session = await create(owner, f.service);
+    await owner.post(`/api/practices/${session.id}/answers`, answerInput(session)); await f.service.idle();
+    const finish = await owner.post(`/api/practices/${session.id}/finish`, {});
+    expect(finish.data.phase).toBe('thinking');
+    await f.service.idle();
+    expect((await owner.get(`/api/practices/${session.id}`)).data.turns).toHaveLength(1);
+    expect(coach).toHaveBeenCalledTimes(1);
+    expect(coach.mock.calls[0][1]).toHaveLength(1);
+  });
+});
+
+describe('failure and process recovery', () => {
+  it('keeps source text when preparation fails, without exposing provider errors', async () => {
+    const f = await fixture({ prepareCourse: async () => { throw new Error('secret provider response'); } });
+    const owner = f.browser();
+    const session = await create(owner, f.service);
+    expect(session.phase).toBe('complete');
+    expect(session.course.excerpts[0].text).toBe(sourceText);
+    expect(session.review?.source).toBe('fallback');
+    expect(JSON.stringify(session)).not.toContain('secret provider response');
   });
 
-  it('bounds analysis failures and retains every saved response for fallback groups', async () => {
-    const analyse: Analyse = async () => new Promise<Analysis[]>(() => {});
-    const f = await fixture({ analyse, analysisTimeoutMs: 20 });
-    const host = f.browser();
-    const room = await createRoom(host);
-    const student = f.browser();
-    await joinAndAnswer(student, room.code);
-    const analysed = await action(host, room.code, 'analyse');
-    expect(analysed.status).toBe(200);
-    expect(analysed.data.aiStatus).toBe('failed');
-    expect(analysed.data.phase).toBe('review');
-    expect(analysed.data.initialCount).toBe(1);
-    expect(analysed.data.pairings[0].kind).toBe('solo');
-    expect(analysed.data.host.responses[0]).not.toHaveProperty('analysis');
+  it('bounds stalled agents and preserves the answer with explicit fallback feedback and review', async () => {
+    const f = await fixture({ reviewAnswer: async () => new Promise<Feedback>(() => {}), answerTimeoutMs: 10,
+      createReview: async () => { throw new Error('provider secret'); } });
+    const owner = f.browser();
+    const session = await create(owner, f.service);
+    await owner.post(`/api/practices/${session.id}/answers`, answerInput(session)); await f.service.idle();
+    const saved = (await owner.get(`/api/practices/${session.id}`)).data as PracticeSession;
+    expect(saved.phase).toBe('ready');
+    expect(saved.turns[0].answer).toBe('My explanation.');
+    expect(saved.turns[0].feedback).toMatchObject({ source: 'fallback', assessment: 'unclear', reviewStatus: 'unavailable' });
+    await owner.post(`/api/practices/${session.id}/finish`, {}); await f.service.idle();
+    const finished = (await owner.get(`/api/practices/${session.id}`)).data;
+    expect(finished.review.source).toBe('fallback');
+    expect(finished.review.nextSteps[0].turnId).toBe(saved.turns[0].id);
+    expect(JSON.stringify(finished)).not.toContain('provider secret');
   });
 
-  it('persists identity, ownership and answers across process restarts', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'pairwise-test-'));
+  it('restores ownership and interrupted answers from disk without making a replacement agent call', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'vivacoach-server-'));
     cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
     const filename = join(directory, 'test.sqlite');
     const first = await fixture({ store: new Store(filename) });
-    const host = first.browser();
-    const room = await createRoom(host);
-    const student = first.browser();
-    const original = await joinAndAnswer(student, room.code);
-    const hostCookie = host.cookie;
-    const studentCookie = student.cookie;
-    // Simulate interruption just after the analysis snapshot was frozen.
-    first.store.run("UPDATE rooms SET phase = 'analysing', ai_status = 'running', analysis_token = 'pending' WHERE code = ?", room.code);
+    const owner = first.browser();
+    const session = await create(owner, first.service);
+    const cookie = owner.cookie;
+    const answerId = randomUUID();
+    const question = session.currentQuestion!;
+    session.phase = 'thinking'; session.pendingAnswer = 'Saved immediately before restart.';
+    first.store.run(`INSERT INTO answers (id, practice_id, idempotency_key, question_id, answer, question_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`, answerId, session.id, randomUUID(), question.id, session.pendingAnswer, JSON.stringify(question), new Date().toISOString());
+    first.store.run("UPDATE practices SET state_json = ?, operation_kind = 'answer', operation_token = 'interrupted' WHERE id = ?", JSON.stringify(session), session.id);
     await first.close();
-    const second = await fixture({ store: new Store(filename) });
-    const reconnectedHost = second.browser();
-    reconnectedHost.cookie = hostCookie;
-    const restored = await reconnectedHost.get(`/api/rooms/${room.code}?view=host`);
-    expect(restored.status).toBe(200);
-    expect(restored.data.phase).toBe('review');
-    expect(restored.data.aiStatus).toBe('failed');
-    const reconnectedStudent = second.browser();
-    reconnectedStudent.cookie = studentCookie;
-    const rejoined = await reconnectedStudent.post(`/api/rooms/${room.code}/join`, {});
-    expect(rejoined.data.self.participant.id).toBe(original.participant.id);
-    expect(rejoined.data.self.initial.reason).toBe(original.answer.reason);
+    const examiner = vi.fn(stubs.reviewAnswer!);
+    const second = await fixture({ store: new Store(filename), reviewAnswer: examiner });
+    const rejoined = second.browser(); rejoined.cookie = cookie;
+    const restored = (await rejoined.get(`/api/practices/${session.id}`)).data as PracticeSession;
+    expect(restored.phase).toBe('ready');
+    expect(restored.turns[0]).toMatchObject({ id: answerId, answer: 'Saved immediately before restart.', feedback: { source: 'fallback' } });
+    expect(restored.currentQuestion?.number).toBe(2);
+    expect(restored.message).toContain('no paid request was retried');
+    expect(examiner).not.toHaveBeenCalled();
+    expect((await second.browser().get(`/api/practices/${session.id}`)).status).toBe(404);
+  });
+});
+
+describe('bounded audio routes', () => {
+  it('authorises audio before provider calls, bounds upload size, and speaks only the saved current question', async () => {
+    const transcribe = vi.fn(stubs.transcribeAudio!);
+    const speak = vi.fn(stubs.speakQuestion!);
+    const f = await fixture({ transcribeAudio: transcribe, speakQuestion: speak });
+    const owner = f.browser();
+    const session = await create(owner, f.service, 'live');
+    const stranger = f.browser();
+    const path = `/api/practices/${session.id}/transcriptions`;
+    expect((await stranger.audio(path, Buffer.alloc(128))).status).toBe(404);
+    expect((await owner.audio(path, Buffer.alloc(128), 'text/plain')).status).toBe(415);
+    expect((await owner.audio(path, Buffer.alloc(2 * 1024 * 1024 + 1))).status).toBe(413);
+    expect(transcribe).not.toHaveBeenCalled();
+    const transcript = await owner.audio(path, Buffer.alloc(128));
+    expect(transcript.status).toBe(200);
+    expect(transcript.data.text).toBe('An editable transcript.');
+    expect(transcribe.mock.calls[0][2]).toBe('Statistics: Sampling concepts');
+    expect(transcribe.mock.calls[0][2]).not.toContain(session.currentQuestion!.text);
+    const audioPath = `/api/practices/${session.id}/question-audio`;
+    expect((await stranger.post(audioPath, { questionId: session.currentQuestion!.id })).status).toBe(404);
+    expect((await owner.post(audioPath, { questionId: randomUUID() })).status).toBe(409);
+    expect((await owner.post(audioPath, { questionId: session.currentQuestion!.id, text: 'Untrusted speech input' })).status).toBe(400);
+    const audio = await fetch(f.base + audioPath, { method: 'POST', headers: { Cookie: owner.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: session.currentQuestion!.id }) });
+    expect(audio.status).toBe(200);
+    expect(audio.headers.get('content-type')).toContain('audio/mpeg');
+    expect(Buffer.from(await audio.arrayBuffer()).toString()).toBe('mock-mp3');
+    expect(speak.mock.calls[0][0]).toBe(session.currentQuestion!.text);
+    expect(f.store.all('SELECT * FROM answers')).toEqual([]);
+  });
+
+  it('keeps both paid audio paths disabled in demo mode', async () => {
+    const transcribe = vi.fn(stubs.transcribeAudio!);
+    const speak = vi.fn(stubs.speakQuestion!);
+    const f = await fixture({ transcribeAudio: transcribe, speakQuestion: speak });
+    const owner = f.browser();
+    const session = await create(owner, f.service);
+    expect((await owner.audio(`/api/practices/${session.id}/transcriptions`, Buffer.alloc(128))).data.code).toBe('DEMO_AUDIO');
+    expect((await owner.post(`/api/practices/${session.id}/question-audio`, { questionId: session.currentQuestion!.id })).data.code).toBe('DEMO_AUDIO');
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(speak).not.toHaveBeenCalled();
   });
 });

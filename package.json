@@ -1,5 +1,5 @@
 {
-  "name": "pairwise",
+  "name": "vivacoach",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -24,6 +24,7 @@
     "lucide-react": "^1.70.0",
     "motion": "^14.10.1",
     "openai": "^7.53.0",
+    "pdfjs-dist": "^6.5.438",
     "qrcode": "^1.5.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
