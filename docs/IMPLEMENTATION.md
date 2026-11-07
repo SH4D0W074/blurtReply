@@ -7,8 +7,8 @@ Course revision through a short oral examination. Choose a sample subject or upl
 ## Cooperating agents
 
 1. Curriculum planner selects three concepts and valid source IDs from supplied material. The application attaches the entire original excerpt; it does not ask the model to reproduce a quotation.
-2. Examiner retrieves relevant source excerpts through a bounded tool loop, interprets an answer and proposes the next question.
-3. Evidence checker independently reviews the examiner's proposal against the student's words and sources. Unsupported feedback is rejected or softened into a clarification; exact quote validation also runs in code.
+2. Examiner retrieves relevant source excerpts through a bounded tool loop, interprets an answer, writes a short conversational reply and proposes the next question. When the student is unsure or asks for an explanation, the reply teaches one small idea from the notes before a simpler follow-up.
+3. Evidence checker independently reviews the examiner's proposal, including the spoken explanation, against the student's words and sources. Unsupported feedback is rejected or softened into a clarification; exact quote validation also runs in code. A helpful explanation never counts as evidence that the student already understood it.
 4. Revision coach reads the accumulated accepted evidence and prepares specific next steps linked to turns and source excerpts.
 
 Every agent has a distinct instruction set, output contract and state transition. The session stores visible activity events and evidence; it never exposes hidden model reasoning. Demo mode is explicitly authored and incurs no model calls. Failure output is labelled, and never passed off as live agent work.
@@ -19,14 +19,14 @@ Visual thesis: a focused midnight-blue revision studio, with warm white typograp
 
 Content: course preparation, a question-and-answer stage with source/evidence inspector, and an actionable session review. No classroom pairing, host dashboard or votes.
 
-Interaction: the question finishes speaking before the microphone opens; the voice form reacts to actual microphone level; an examiner question transitions into the student's highlighted claim and source evidence. Agent activity shows real handoffs without fabricated progress percentages. Respect reduced motion and provide editable text input throughout.
+Interaction: after an answer, the saved conversational reply appears above the next question. Voice mode speaks the reply and question together before the microphone opens; the voice form reacts to actual microphone level. The final answer also receives a closing response, with no further microphone capture. Agent activity shows real handoffs without fabricated progress percentages. Respect reduced motion and provide editable text input throughout.
 
 ## Architecture and ownership
 
 - React/Vite/TypeScript interface, Express server, local SQLite. Existing OpenAI key stays in ignored `.env.local`.
-- PDF text extracted in the browser with PDF.js. Text/Markdown can also be read locally. Only extracted text is sent to the application server. Scanned PDFs require pasted text; no OCR promise.
+- PDF text extracted in the browser with PDF.js, with cancellation, page progress and a 30-second deadline. Replacing, editing or clearing an import invalidates its result; failures preserve the previous draft. Text/Markdown can also be read locally. Only extracted text is sent to the application server. PDF page markers bound source excerpts and supply page metadata; unmarked notes retain their original sentence-based splitting. Scanned PDFs require pasted text; partially scanned PDFs report unreadable pages. No OCR promise.
 - Microphone records bounded turns, then OpenAI `gpt-transcribe` transcribes them. A voice session submits the completed transcript automatically after **Done speaking**, unless transcript review is enabled or a draft/interrupt needs attention. The manual typed path remains available. Audio is not stored by this app.
-- Examiner audio uses browser speech by default; optional ElevenLabs synthesis uses a server-held key and caches each question's audio. Playback and recording can be stopped.
+- Examiner audio uses browser speech without a provider key; optional ElevenLabs synthesis uses a server-held key, Sarah with Multilingual v2 by default, and caches each reply/question combination by text, voice, model and settings. Combining the reply and next question uses one synthesis request per turn. Playback and recording can be paused, resumed or stopped. Resume is available beside the paused microphone; draft or interrupted recordings require review before submission. Older saved practices without a conversational reply use their existing observation.
 - Loopback-only server by default. Browser identity owns its sessions; no public sharing or deployment.
 - Supabase is not required: the local SQLite database stores course content, answers and reviews, and an anonymous browser cookie controls access. Accounts and cross-device synchronisation are outside this local prototype.
 - Existing `vivacoach` database, cookie, environment-variable and browser-storage names remain internal compatibility identifiers so the blurtReply rename preserves saved sessions and configuration.
@@ -42,7 +42,7 @@ Interaction: the question finishes speaking before the microphone opens; the voi
 - `POST /api/practices/:id/answers {questionId,answer,idempotencyKey}` → PracticeSession in the thinking phase. Persist input before AI calls; reject parallel or stale submissions, replay idempotently. The browser polls real progress.
 - `POST /api/practices/:id/finish {}` → PracticeSession. Allowed when ready; creates a review from completed turns.
 - `POST /api/practices/:id/transcriptions` with a raw audio body and its audio Content-Type → `{text,model}`. Owner only, bounded payload, no storage.
-- `POST /api/practices/:id/question-audio {questionId}` → MP3 of server-owned current question. Owner only; optional provider, cached.
+- `POST /api/practices/:id/question-audio {questionId}` → MP3 of the saved reply followed by the current question, or the closing reply when complete (using the last answered question ID). Owner only; optional provider, cached. The client cannot supply arbitrary speech text.
 - Error JSON `{error,code}`; errors must not expose provider bodies or secrets.
 
 ## Agent module contract

@@ -20,6 +20,8 @@
 .voice-answer-stage .voice-session__copy > .voice-session__timer { color: var(--accent-bright); font-variant-numeric: tabular-nums; }
 .voice-answer-stage .voice-session__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 18px; margin-top: 13px; }
 .voice-answer-stage .voice-session__primary { gap: 11px; min-height: 48px; padding: 11px 17px; }
+.voice-answer-stage .voice-session__resume { min-width: 186px; }
+.voice-answer-stage .voice-session--paused .voice-session__form { color: var(--muted); }
 .voice-answer-stage .voice-session__type { gap: 7px; font-size: 10px; }
 .voice-answer-stage .voice-session__preferences { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .voice-answer-stage .voice-session__review { display: inline-flex; align-items: center; gap: 9px; min-height: 35px; width: fit-content; color: #d6d9e8; font-size: 11px; cursor: pointer; }

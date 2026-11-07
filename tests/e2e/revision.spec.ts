@@ -74,19 +74,23 @@ function selectablePdf(): Buffer {
     'Virtue ethics asks about the character and practical judgement of the person acting.',
     'A strong comparison distinguishes a theory from the justification of a particular choice.',
   ];
-  const stream = `BT /F1 12 Tf 40 740 Td 18 TL ${lines.map((line, index) => `${index ? 'T* ' : ''}(${line}) Tj`).join('\n')} ET`;
+  const pageStream = (content: string[]) => `BT /F1 12 Tf 40 740 Td 18 TL ${content.map((line, index) => `${index ? 'T* ' : ''}(${line}) Tj`).join('\n')} ET`;
+  const stream = pageStream(lines.slice(0, 3));
+  const secondStream = pageStream(lines.slice(3));
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 7 0 R >>',
+    `<< /Length ${Buffer.byteLength(secondStream)} >>\nstream\n${secondStream}\nendstream`,
   ];
   let content = '%PDF-1.4\n';
   const offsets = [0];
   objects.forEach((object, index) => { offsets.push(Buffer.byteLength(content)); content += `${index + 1} 0 obj\n${object}\nendobj\n`; });
   const xref = Buffer.byteLength(content);
-  content += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n `).join('\n')}\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  content += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return Buffer.from(content);
 }
 
@@ -102,6 +106,14 @@ test('extracts real PDF text, preserves its draft, and uses it as visible source
   await expect(page.getByLabel('Your answer', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Sources' }).click();
   await expect(page.locator('.source-list__name')).toContainText('Ethics revision.pdf');
+  await expect(page.locator('.source-row strong')).toHaveText(['Page 1 · passage 1', 'Page 2 · passage 1']);
+  await expect(page.locator('.source-row small')).toHaveText(['Page 1', 'Page 2']);
   await page.locator('.source-row').first().click();
   await expect(page.getByRole('dialog')).toContainText('Consequentialism');
+  await expect(page.getByRole('dialog')).toContainText('[Page 1]');
+  await page.keyboard.press('Escape');
+  await page.locator('.source-row').nth(1).click();
+  await expect(page.getByRole('dialog')).toContainText('Your source material / Page 2');
+  await expect(page.getByRole('dialog')).toContainText('Virtue ethics');
+  await expect(page.getByRole('dialog')).not.toContainText('Consequentialism');
 });

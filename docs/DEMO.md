@@ -4,7 +4,7 @@
 
 Open http://localhost:3000 on the presentation computer. Choose the statistics sample and prepare a live practice before the pitch, so the first question is ready. Check microphone permission and select **Hear the question** once. When presenting ElevenLabs, confirm the label remains **ElevenLabs voice** while it plays. Keep a free guided demo in a second tab as an explicitly labelled fallback. Leave **Review transcript before sending** off for the short voice walkthrough; enable it when demonstrating transcript correction.
 
-The app runs locally, but live agents and transcription need the internet. OpenAI transcribes spoken answers; ElevenLabs speaks questions when its key is configured. The four cooperating agents continue to handle the learning flow. Device speech is the fallback. The free guided demo never calls ElevenLabs.
+The app runs locally, but live agents and transcription need the internet. OpenAI transcribes spoken answers; ElevenLabs speaks the coach's response followed by the next question when its key is configured. The four cooperating agents continue to handle the learning flow. Device speech is the fallback. The free guided demo never calls ElevenLabs.
 
 ## One-minute walkthrough
 
@@ -14,10 +14,12 @@ The app runs locally, but live agents and transcription need the internet. OpenA
 | 10–20s | Your turn; the microphone opens and the waveform follows the sound | “If two variables increase together, that proves one causes the other.” |
 | 20–30s | Select Done speaking; transcription and submission follow | The student's words become the answer. Transcript review can be enabled when wanted. |
 | 30–45s | Agent activity | The examiner reads a course source, proposes feedback, and hands it to an independent evidence checker. Wait for the real result. |
-| 45–55s | Evidence panel and spoken follow-up | Compare **You said** with **Your notes say** while the next question plays. Select Pause before discussing the evidence. |
+| 45–55s | Conversational response and spoken follow-up | The coach responds to the answer before asking the next question. Compare **You said** with **Your notes say**; select Pause before discussing the evidence. |
 | 55–60s | Finish here, or a previously completed review clearly identified as such | Show that revision actions point back to saved answers and sources. |
 
 Live timings and exact questions vary. If a provider is slow or unavailable, say so and use **Free guided demo → Use example answer**. The demo never pretends that authored feedback is a live model response.
+
+To show the supportive conversation, answer **“I don’t know. Can you explain it?”** The examiner should explain one small idea from the course notes, then ask a simpler question. The evidence checker reviews the explanation too. In voice mode, the microphone stays off until both the response and next question finish. A final response also plays after the sixth answer, without reopening the microphone.
 
 ## 60-second pitch
 

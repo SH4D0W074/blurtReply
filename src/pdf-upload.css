@@ -1,0 +1,18 @@
+.pdf-import-progress {
+  margin: 0 0 14px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.pdf-import-progress > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.pdf-import-progress p { margin: 0; font-size: 12px; line-height: 1.5; }
+.pdf-import-progress p span { display: block; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.pdf-import-progress .text-button { min-height: 30px; flex-shrink: 0; }
+.pdf-import-progress progress { display: block; width: 100%; height: 5px; margin: 10px 0; accent-color: var(--accent); }
+.pdf-import-progress small, .pdf-import-notice { color: var(--muted); font-size: 10px; line-height: 1.6; }
+.pdf-import-notice { margin: 0 0 12px; }
+@media (max-width: 520px) {
+  .pdf-import-progress { padding: 10px 12px; }
+  .pdf-import-progress > div { gap: 10px; }
+}

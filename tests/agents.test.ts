@@ -23,12 +23,13 @@ function tool(name = 'read_source', args: unknown = { sourceId: 'stats-associati
 function proposal(overrides: Record<string, unknown> = {}) {
   return {
     assessment: 'supported', claimQuote: answer, sourceId: course.excerpts[0].id, sourceQuote: course.excerpts[0].text,
+    reply: 'You kept the distinction between association and causation clear. A common cause or reverse causation could still explain the pattern.',
     observation: 'This answer distinguishes an association from a causal conclusion.',
     followUp: 'What common cause could explain the association without sleep causing higher scores?', followUpKind: 'transfer', ...overrides,
   };
 }
 function verifier(overrides: Record<string, unknown> = {}) {
-  return { verdict: 'accept', claimFaithful: true, sourceSupportsAssessment: true, observationSupported: true, followUpGrounded: true, issue: 'none', ...overrides };
+  return { verdict: 'accept', claimFaithful: true, sourceSupportsAssessment: true, replySupported: true, observationSupported: true, followUpGrounded: true, issue: 'none', ...overrides };
 }
 function planner() {
   return { title: course.title, subject: course.subject, concepts: course.concepts.map(({ sourceQuote: _quote, ...concept }) => concept) };
@@ -93,6 +94,59 @@ describe('honest demo and course planning', () => {
     expect(emit.mock.calls[0][0]).toMatchObject({ state: 'limited', label: 'Prepared generic reading prompts' });
   });
 
+  it('keeps PDF pages separate and attaches their explicit page numbers without rewriting the source', async () => {
+    const pages = [
+      '[Page 2]\nAn observed association does not, by itself, establish causation.\n\n',
+      '[Page 5]\nRandom assignment can support a causal interpretation, but only under the stated assumptions.',
+    ];
+    const text = pages.join('');
+    const prepared = await agents.prepareCourse({ text, sourceName: 'lecture.pdf', origin: 'upload' }, 'demo', emit);
+    expect(prepared.excerpts).toEqual([
+      { id: 'note-1', label: 'Page 2 · passage 1', page: 2, text: pages[0] },
+      { id: 'note-2', label: 'Page 5 · passage 1', page: 5, text: pages[1] },
+    ]);
+    expect(prepared.excerpts.map((source) => source.text).join('')).toBe(text);
+    expect(prepared.concepts.every((concept) => prepared.excerpts.some((source) => source.id === concept.sourceId && source.text === concept.sourceQuote))).toBe(true);
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it('chunks an oversized PDF page without splitting a sentence from its qualification or crossing pages', async () => {
+    const longSentence = `Although ${'a measurement may vary with context; '.repeat(55)}this does not establish a causal effect without further assumptions. `;
+    const pageOne = `[Page 1]\nStart with the scope of the claim. ${longSentence}A separate sentence describes the next step.\n\n`;
+    const pageTwo = '[Page 2]\nThis page concerns a different claim and must remain a separate source.';
+    const prepared = await agents.prepareCourse({ text: pageOne + pageTwo, sourceName: 'long-page.pdf', origin: 'upload' }, 'demo', emit);
+    const firstPage = prepared.excerpts.filter((source) => source.page === 1);
+    expect(firstPage.length).toBeGreaterThan(1);
+    expect(firstPage.map((source) => source.text).join('')).toBe(pageOne);
+    expect(firstPage.some((source) => source.text.includes(longSentence))).toBe(true);
+    expect(firstPage.every((source) => source.label.startsWith('Page 1 · passage ') && !source.text.includes('[Page 2]'))).toBe(true);
+    expect(prepared.excerpts.filter((source) => source.page === 2).map((source) => source.text).join('')).toBe(pageTwo);
+    expect(prepared.excerpts.map((source) => source.text).join('')).toBe(pageOne + pageTwo);
+    expect(new Set(prepared.excerpts.map((source) => source.id)).size).toBe(prepared.excerpts.length);
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it('preserves unnumbered prefaces and original PDF line endings without assigning them a page', async () => {
+    const preamble = 'Lecturer introduction: these notes include qualifications.\r\n\r\n';
+    const firstPage = '[Page 3]  \r\nThe model may apply only under these assumptions.\r\n\r\n';
+    const secondPage = '[Page 8]\r\nThe next example does not establish the converse.';
+    const prepared = await agents.prepareCourse({ text: preamble + firstPage + secondPage, origin: 'upload' }, 'demo', emit);
+    expect(prepared.excerpts.map((source) => source.text)).toEqual([preamble, firstPage, secondPage]);
+    expect(prepared.excerpts.map((source) => source.page)).toEqual([undefined, 3, 8]);
+    expect(prepared.excerpts[0].label).toBe('Passage 1');
+  });
+
+  it('leaves plain notes and inline page references unnumbered with their original passage labels', async () => {
+    const firstSentence = `This ordinary note ${'retains its qualification and context; '.repeat(45)}does not refer to a numbered source page. `;
+    const secondSentence = 'The citation [Page 9] appears inline and must not create page metadata.';
+    const prepared = await agents.prepareCourse({ text: firstSentence + secondSentence, sourceName: 'notes.txt', origin: 'upload' }, 'demo', emit);
+    expect(prepared.excerpts).toEqual([
+      { id: 'note-1', label: 'Passage 1', text: firstSentence },
+      { id: 'note-2', label: 'Passage 2', text: secondSentence },
+    ]);
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
   it('resolves planner source IDs to original quotes instead of asking the model to copy them', async () => {
     enable();
     const plan = planner();
@@ -138,7 +192,7 @@ describe('retrieval and independent verification', () => {
     enable();
     provider.create.mockResolvedValueOnce(tool()).mockResolvedValueOnce(response(proposal())).mockResolvedValueOnce(response(verifier()));
     const feedback = await agents.reviewAnswer(course, question, answer, [], 'live', emit);
-    expect(feedback).toMatchObject({ source: 'ai', reviewStatus: 'checked', assessment: 'supported', claimQuote: answer });
+    expect(feedback).toMatchObject({ source: 'ai', reviewStatus: 'checked', assessment: 'supported', claimQuote: answer, reply: proposal().reply });
     expect(provider.create).toHaveBeenCalledTimes(3);
     const first = provider.create.mock.calls[0][0];
     expect(first.tool_choice).toBe('required');
@@ -153,6 +207,79 @@ describe('retrieval and independent verification', () => {
     expect(JSON.parse(check.input)).toMatchObject({ answer, sources: [course.excerpts[0]], proposal: proposal() });
     expect(check.tools).toBeUndefined();
     expect(agents.getTextAIUsage()).toMatchObject({ calls: 3, toolCalls: 1, inputTokens: 300, outputTokens: 150, reasoningTokens: 30 });
+  });
+
+  it.each(["I don't know.", 'Can you explain that?', 'What does that mean?'])('supports a source-grounded explanation and teach-back for: %s', async (helpRequest) => {
+    enable();
+    const teaching = proposal({
+      assessment: 'unclear', claimQuote: null,
+      reply: 'Let’s start with the distinction. An association means two measured variables vary together, but that alone does not establish that one causes the other.',
+      observation: 'The student requested help and has not offered an explanation to assess.',
+      followUp: 'In your own words, what does an association leave unresolved?', followUpKind: 'probe',
+    });
+    provider.create.mockResolvedValueOnce(tool()).mockResolvedValueOnce(response(teaching)).mockResolvedValueOnce(response(verifier()));
+    const feedback = await agents.reviewAnswer(course, question, helpRequest, [], 'live', emit);
+    expect(feedback).toMatchObject({ source: 'ai', assessment: 'unclear', claimQuote: null, reply: teaching.reply, followUp: teaching.followUp, followUpKind: 'probe' });
+    const examiner = provider.create.mock.calls[0][0];
+    expect(examiner.text.format.schema.required).toContain('reply');
+    expect(examiner.text.format.schema.properties.reply).toMatchObject({ type: 'string', minLength: 1, maxLength: 650 });
+    expect(examiner.instructions).toContain('do not praise an explanation they did not give');
+    expect(examiner.instructions).toContain('"I don\'t know"');
+    expect(examiner.instructions).toContain('"can you explain that?"');
+    expect(examiner.instructions).toContain('"what does that mean?"');
+    expect(examiner.instructions).toContain('reply must not ask a question or repeat followUp');
+    const check = provider.create.mock.calls[2][0];
+    expect(check.text.format.schema.required).toContain('replySupported');
+    expect(check.instructions).toContain('every factual explanation in reply is grounded in the retrieved source');
+    expect(check.instructions).toContain('require assessment unclear and claimQuote null');
+    expect(JSON.parse(check.input)).toMatchObject({ answer: helpRequest, proposal: teaching });
+    expect(provider.create).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    { verdict: 'veto', replySupported: false, issue: 'unsupported-interpretation' },
+    { verdict: 'accept', replySupported: false, issue: 'none' },
+  ])('withholds unsupported teaching even when other evidence checks pass: $verdict', async (decision) => {
+    enable();
+    const unsupportedReply = 'You already understand that extra sleep definitely causes better scores, and the association proves it.';
+    provider.create.mockResolvedValueOnce(tool()).mockResolvedValueOnce(response(proposal({ reply: unsupportedReply }))).mockResolvedValueOnce(response(verifier(decision)));
+    const feedback = await agents.reviewAnswer(course, question, answer, [], 'live', emit);
+    expect(feedback).toMatchObject({ assessment: 'unclear', source: 'fallback', reviewStatus: 'needs-review', claimQuote: null });
+    expect(feedback.reply).toContain(course.excerpts[0].label);
+    expect(feedback.reply).toContain("hasn't been assessed");
+    expect(JSON.stringify({ feedback, events: emit.mock.calls })).not.toContain(unsupportedReply);
+    expect(provider.create).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['missing', 'blank', 'too-long', 'repeated-question'])('rejects an invalid conversational reply before independent verification: %s', async (invalidReply) => {
+    enable();
+    const changed = proposal();
+    const reply = invalidReply === 'missing' ? undefined : invalidReply === 'blank' ? '   ' : invalidReply === 'too-long' ? 'a'.repeat(651) : `${changed.reply} ${changed.followUp}`;
+    provider.create.mockResolvedValueOnce(tool()).mockResolvedValueOnce(response({ ...changed, reply }));
+    const feedback = await agents.reviewAnswer(course, question, answer, [], 'live', emit);
+    expect(feedback).toMatchObject({ assessment: 'unclear', source: 'fallback', reviewStatus: 'unavailable' });
+    expect(feedback.reply).toContain("hasn't been assessed");
+    expect(provider.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives examiner and verifier the previous teaching so an assisted teach-back is not treated as prior knowledge', async () => {
+    enable();
+    const explanation = 'An association alone does not establish causation; a common cause may influence both variables.';
+    const previous = turn({ assessment: 'unclear', claimQuote: null, reply: explanation }, { answer: "I don't know.", id: 'help-turn' });
+    provider.create.mockResolvedValueOnce(tool()).mockResolvedValueOnce(response(proposal())).mockResolvedValueOnce(response(verifier()));
+    await agents.reviewAnswer(course, question, answer, [previous], 'live', emit);
+    const history = [{ question: previous.question.text, answer: previous.answer, reply: explanation, followUp: previous.feedback.followUp }];
+    expect(JSON.parse(provider.create.mock.calls[0][0].input[0].content).previousTurns).toEqual(history);
+    expect(JSON.parse(provider.create.mock.calls[2][0].input).previousTurns).toEqual(history);
+    expect(provider.create.mock.calls[0][0].instructions).toContain('assisted practice, not proof of independent or prior knowledge');
+    expect(provider.create.mock.calls[2][0].instructions).toContain('assisted practice, not proof of independent or prior knowledge');
+    expect(provider.create).toHaveBeenCalledTimes(3);
+  });
+
+  it('uses a supportive limitation instead of invented teaching when no source is available', async () => {
+    const feedback = await agents.reviewAnswer({ ...course, excerpts: [] }, question, "I don't know.", [], 'live', emit);
+    expect(feedback).toMatchObject({ assessment: 'unclear', sourceId: null, sourceQuote: null, source: 'fallback', reply: "We can take this one step at a time. I don't have verified source material to explain this reliably yet." });
+    expect(provider.create).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -283,6 +410,19 @@ describe('budgets, deadlines and final review', () => {
     expect(JSON.stringify(sent)).not.toContain('An unassessed answer.');
     provider.create.mockResolvedValueOnce(response({ strengths: [], revisit: [], nextSteps: [{ ...point, turnId: 'invented-turn' }] }));
     expect((await agents.createReview(course, [good], 'live', emit)).source).toBe('fallback');
+  });
+
+  it('continues reviewing a persisted checked answer that predates conversational replies', async () => {
+    enable();
+    const legacy = turn();
+    delete legacy.feedback.reply;
+    const point = { text: 'Practise the association and causation distinction again.', turnId: legacy.id, sourceId: legacy.feedback.sourceId };
+    provider.create.mockResolvedValueOnce(response({ strengths: [], revisit: [], nextSteps: [point] }));
+    const review = await agents.createReview(course, [JSON.parse(JSON.stringify(legacy))], 'live', emit);
+    expect(review.source).toBe('ai');
+    expect(review.nextSteps).toEqual([point]);
+    expect(JSON.parse(provider.create.mock.calls[0][0].input).acceptedTurns[0].feedback).not.toHaveProperty('reply');
+    expect(provider.create).toHaveBeenCalledTimes(1);
   });
 
   it('does not accept a strength attributed to a partial answer or call a coach without checked evidence', async () => {
