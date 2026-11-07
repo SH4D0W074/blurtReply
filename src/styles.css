@@ -79,7 +79,7 @@ svg { vertical-align: middle; flex-shrink: 0; }
 .home-intro__caption em { color: var(--accent-bright); }
 .home-intro__caption > span { font-size: 11px; line-height: 1.9; color: var(--muted); padding-left: 26px; border-left: 1px solid var(--line); }
 .home-intro__voice { min-width: 0; padding-top: 5px; }
-.voice-form { color: var(--accent); width: 100%; position: relative; }
+.voice-form { color: var(--accent); width: 100%; position: relative; pointer-events: none; }
 .voice-form svg { display: block; width: 100%; height: 185px; overflow: visible; }
 .voice-form__axis { stroke: #5c668a; stroke-width: .5; opacity: .4; stroke-dasharray: 2 5; }
 .voice-form--large { margin: 0 -23px; width: calc(100% + 46px); }

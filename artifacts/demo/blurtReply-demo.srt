@@ -1,0 +1,79 @@
+1
+00:00:00,350 --> 00:00:02,553
+Your lecture notes can look familiar
+
+2
+00:00:02,553 --> 00:00:05,124
+until someone asks you to explain them.
+
+3
+00:00:05,124 --> 00:00:07,327
+With blurtReply, choose a sample subject
+
+4
+00:00:07,327 --> 00:00:09,530
+or bring your own course material.
+
+5
+00:00:09,530 --> 00:00:13,202
+A planner selects three concepts for your spoken revision session.
+
+6
+00:00:14,509 --> 00:00:17,777
+Why does an observed correlation not, by itself,
+
+7
+00:00:17,777 --> 00:00:20,228
+show that one variable causes another?
+
+8
+00:00:20,560 --> 00:00:22,865
+“I don’t know. Could you explain it?”
+
+9
+00:00:28,891 --> 00:00:31,929
+A correlation shows that variables are associated,
+
+10
+00:00:31,929 --> 00:00:36,703
+but that alone doesn’t show that changing one causes the other.
+
+11
+00:00:36,703 --> 00:00:41,478
+Reverse causation, a shared cause, or chance could explain the association.
+
+12
+00:00:41,478 --> 00:00:47,120
+In your own words, why isn’t an observed correlation enough to show causation?
+
+13
+00:00:48,000 --> 00:00:51,853
+The examiner retrieves a passage from your course material
+
+14
+00:00:51,853 --> 00:00:53,137
+before proposing feedback.
+
+15
+00:00:53,137 --> 00:00:56,134
+A separate evidence checker reviews that explanation
+
+16
+00:00:56,134 --> 00:00:58,275
+and can withhold unsupported feedback.
+
+17
+00:00:58,275 --> 00:01:03,412
+Open the quoted source to compare the explanation with the original wording.
+
+18
+00:01:04,200 --> 00:01:07,509
+After your session, the revision coach links next steps
+
+19
+00:01:07,509 --> 00:01:09,715
+to saved answers and source passages,
+
+20
+00:01:09,715 --> 00:01:14,127
+giving you a specific explanation to practise in your next study session.
