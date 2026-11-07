@@ -12,6 +12,9 @@ interface VoiceDependencies {
 }
 
 const AUDIO_LIMIT = 2 * 1024 * 1024;
+const QUESTION_AUDIO_FORMAT = 'mp3_44100_128';
+const QUESTION_VOICE_SETTINGS = { stability: 0.4, similarity_boost: 0.75 };
+const VOICE_MODELS = new Set(['eleven_multilingual_v2', 'eleven_flash_v2_5']);
 const formats: Record<string, string> = {
   'audio/webm': 'webm', 'audio/wav': 'wav', 'audio/x-wav': 'wav',
   'audio/mp4': 'mp4', 'audio/m4a': 'm4a', 'audio/x-m4a': 'm4a',
@@ -46,7 +49,8 @@ export function createVoiceService(dependencies: VoiceDependencies = {}) {
       enabled: env.VIVACOACH_LIVE_AI === 'true',
       openaiKey: env.OPENAI_API_KEY?.trim() ?? '',
       elevenKey: env.ELEVENLABS_API_KEY?.trim() ?? '',
-      voiceId: env.ELEVENLABS_VOICE_ID?.trim() || 'JBFqnCBsd6RMkjVDRZzb',
+      voiceId: env.ELEVENLABS_VOICE_ID?.trim() || 'EXAVITQu4vr4xnSDxMaL',
+      voiceModel: env.ELEVENLABS_MODEL_ID?.trim() || 'eleven_multilingual_v2',
       model: env.OPENAI_TRANSCRIPTION_MODEL?.trim() || 'gpt-transcribe',
       maxTranscriptions: capped(env.VIVACOACH_MAX_TRANSCRIPTIONS, 12, 60),
       maxVoiceCalls: capped(env.VIVACOACH_MAX_VOICE_CALLS, 30, 120),
@@ -98,9 +102,9 @@ export function createVoiceService(dependencies: VoiceDependencies = {}) {
   async function speakQuestion(text: string, cacheKey: string) {
     const c = config();
     if (!c.enabled || !c.elevenKey) throw new VoiceError('Use the voice available on your device.', 'DEVICE_VOICE');
-    if (!/^[a-zA-Z0-9]{10,80}$/.test(c.voiceId)) throw new VoiceError('The examiner voice is not configured correctly. Use device voice.', 'VOICE_CONFIGURATION');
+    if (!/^[a-zA-Z0-9]{10,80}$/.test(c.voiceId) || !VOICE_MODELS.has(c.voiceModel)) throw new VoiceError('The examiner voice is not configured correctly. Use device voice.', 'VOICE_CONFIGURATION');
     if (!text.trim() || text.length > 1200) throw new VoiceError('This question cannot be played. You can read it on screen.', 'QUESTION_AUDIO_INVALID', 400);
-    const hash = createHash('sha256').update(`${cacheKey}\0${c.voiceId}\0${text}`).digest('hex');
+    const hash = createHash('sha256').update(JSON.stringify([cacheKey, c.voiceId, c.voiceModel, QUESTION_AUDIO_FORMAT, QUESTION_VOICE_SETTINGS, text])).digest('hex');
     const cached = audioCache.get(hash);
     if (cached) return cached;
     if (voiceCalls >= c.maxVoiceCalls) throw new VoiceError('The examiner voice limit has been reached. Use device voice.', 'VOICE_LIMIT', 429);
@@ -108,10 +112,10 @@ export function createVoiceService(dependencies: VoiceDependencies = {}) {
 
     const request = (async () => {
       try {
-        const response = await fetcher(`https://api.elevenlabs.io/v1/text-to-speech/${c.voiceId}?output_format=mp3_22050_32`, {
+        const response = await fetcher(`https://api.elevenlabs.io/v1/text-to-speech/${c.voiceId}?output_format=${QUESTION_AUDIO_FORMAT}`, {
           method: 'POST',
           headers: { 'xi-api-key': c.elevenKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-          body: JSON.stringify({ text, model_id: 'eleven_flash_v2_5', voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+          body: JSON.stringify({ text, model_id: c.voiceModel, voice_settings: QUESTION_VOICE_SETTINGS }),
           signal: AbortSignal.timeout(20_000),
           redirect: 'error',
         });

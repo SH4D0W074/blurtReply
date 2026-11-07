@@ -100,15 +100,37 @@ const plannerSchema = z.object({
 
 /** Excerpts are kept intact. An oversized sentence is not cut into a misleading partial claim. */
 function excerptsFrom(text: string): SourceExcerpt[] {
-  const segments = [...new Intl.Segmenter('en', { granularity: 'sentence' }).segment(text)].map((item) => item.segment);
-  const chunks: string[] = [];
-  let current = '';
-  for (const segment of segments) {
-    if (current && current.length + segment.length > 1_600) { chunks.push(current); current = ''; }
-    current += segment;
+  // Only a complete importer-style marker line establishes a page boundary.
+  // Inline references such as "see [Page 2]" remain ordinary source text.
+  const markers = [...text.matchAll(/^[\t ]*\[Page ([1-9]\d*)\][\t ]*(?=\r?$)/gm)]
+    .filter((marker) => Number.isSafeInteger(Number(marker[1])));
+  const sections: { text: string; page?: number }[] = [];
+  if (markers.length) {
+    const preamble = text.slice(0, markers[0].index);
+    if (preamble.trim()) sections.push({ text: preamble });
+    markers.forEach((marker, index) => {
+      // Keep marker lines and separators verbatim, including initial whitespace.
+      const start = index === 0 && !preamble.trim() ? 0 : marker.index;
+      sections.push({ text: text.slice(start, markers[index + 1]?.index ?? text.length), page: Number(marker[1]) });
+    });
+  } else sections.push({ text });
+
+  const excerpts: SourceExcerpt[] = [];
+  const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' });
+  for (const section of sections) {
+    const chunks: string[] = [];
+    let current = '';
+    for (const { segment } of segmenter.segment(section.text)) {
+      if (current && current.length + segment.length > 1_600) { chunks.push(current); current = ''; }
+      current += segment;
+    }
+    if (current.trim()) chunks.push(current);
+    chunks.filter((chunk) => chunk.trim()).forEach((chunk, index) => {
+      const number = excerpts.length + 1;
+      excerpts.push({ id: `note-${number}`, label: section.page === undefined ? `Passage ${number}` : `Page ${section.page} · passage ${index + 1}`, text: chunk, ...(section.page === undefined ? {} : { page: section.page }) });
+    });
   }
-  if (current.trim()) chunks.push(current);
-  return chunks.filter((chunk) => chunk.trim()).map((chunk, index) => ({ id: `note-${index + 1}`, label: `Passage ${index + 1}`, text: chunk }));
+  return excerpts;
 }
 function fallbackConcepts(excerpts: SourceExcerpt[]): Concept[] {
   const prompts = ['Explain the main idea in your own words.', 'Explain a relationship or mechanism described in this passage.', 'Give an example, qualification or limitation of a claim in this passage.'];

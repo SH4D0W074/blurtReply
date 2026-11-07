@@ -24,9 +24,9 @@ Interaction: the question finishes speaking before the microphone opens; the voi
 ## Architecture and ownership
 
 - React/Vite/TypeScript interface, Express server, local SQLite. Existing OpenAI key stays in ignored `.env.local`.
-- PDF text extracted in the browser with PDF.js. Text/Markdown can also be read locally. Only extracted text is sent to the application server. Scanned PDFs require pasted text; no OCR promise.
+- PDF text extracted in the browser with PDF.js, with cancellation, page progress and a 30-second deadline. Replacing, editing or clearing an import invalidates its result; failures preserve the previous draft. Text/Markdown can also be read locally. Only extracted text is sent to the application server. PDF page markers bound source excerpts and supply page metadata; unmarked notes retain their original sentence-based splitting. Scanned PDFs require pasted text; partially scanned PDFs report unreadable pages. No OCR promise.
 - Microphone records bounded turns, then OpenAI `gpt-transcribe` transcribes them. A voice session submits the completed transcript automatically after **Done speaking**, unless transcript review is enabled or a draft/interrupt needs attention. The manual typed path remains available. Audio is not stored by this app.
-- Examiner audio uses browser speech by default; optional ElevenLabs synthesis uses a server-held key and caches each question's audio. Playback and recording can be stopped.
+- Examiner audio uses browser speech without a provider key; optional ElevenLabs synthesis uses a server-held key, Sarah with Multilingual v2 by default, and caches each question's audio by voice, model and settings. Playback and recording can be paused, resumed or stopped. Resume is available beside the paused microphone; draft or interrupted recordings require review before submission.
 - Loopback-only server by default. Browser identity owns its sessions; no public sharing or deployment.
 - Supabase is not required: the local SQLite database stores course content, answers and reviews, and an anonymous browser cookie controls access. Accounts and cross-device synchronisation are outside this local prototype.
 - Existing `vivacoach` database, cookie, environment-variable and browser-storage names remain internal compatibility identifiers so the blurtReply rename preserves saved sessions and configuration.

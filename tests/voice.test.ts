@@ -56,6 +56,33 @@ describe('bounded voice providers', () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('uses the conversational voice configuration and separates cached audio by voice and model', async () => {
+    const environment: Record<string, string> = { ...enabled };
+    const fetcher = vi.fn(async (_url: string | URL | Request, _options?: RequestInit) => new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'audio/mpeg' } }));
+    const service = createVoiceService({ environment: () => environment, fetcher });
+    await service.speakQuestion('Explain correlation.', 'q1');
+    expect(fetcher.mock.calls[0][0]).toBe('https://api.elevenlabs.io/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL?output_format=mp3_44100_128');
+    expect(JSON.parse(fetcher.mock.calls[0][1]?.body as string)).toEqual({
+      text: 'Explain correlation.', model_id: 'eleven_multilingual_v2',
+      voice_settings: { stability: 0.4, similarity_boost: 0.75 },
+    });
+    environment.ELEVENLABS_MODEL_ID = 'eleven_flash_v2_5';
+    await service.speakQuestion('Explain correlation.', 'q1');
+    environment.ELEVENLABS_VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb';
+    await service.speakQuestion('Explain correlation.', 'q1');
+    await service.speakQuestion('Explain correlation.', 'q1');
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(fetcher.mock.calls[1][1]?.body as string).model_id).toBe('eleven_flash_v2_5');
+  });
+
+  it('rejects unsupported speech configuration before spending a generation', async () => {
+    const fetcher = vi.fn();
+    const service = createVoiceService({ environment: () => ({ ...enabled, ELEVENLABS_MODEL_ID: 'unknown-model' }), fetcher });
+    await expect(service.speakQuestion('Explain correlation.', 'q1')).rejects.toMatchObject({ code: 'VOICE_CONFIGURATION' });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(service.getVoiceStatus().remainingVoiceCalls).toBe(30);
+  });
+
   it('evicts failed audio and enforces the voice budget', async () => {
     const fetcher = vi.fn(async () => new Response('provider secret', { status: 401 }));
     const service = createVoiceService({ environment: () => ({ ...enabled, VIVACOACH_MAX_VOICE_CALLS: '1' }), fetcher });

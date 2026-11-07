@@ -111,7 +111,7 @@ function gate() {
 
 interface Submission { questionId: string; answer: string; idempotencyKey: string }
 
-async function mockPractice(page: Page, options: { denied?: boolean; holdTranscription?: boolean; holdAudio?: boolean } = {}) {
+async function mockPractice(page: Page, options: { denied?: boolean; holdTranscription?: boolean; holdAudio?: boolean; failTranscription?: boolean } = {}) {
   await installMicrophone(page, options.denied);
   const timestamp = '2026-11-07T12:00:00.000Z';
   const source = { id: 'association', label: 'Association and causation', text: 'Correlation describes an association. An association alone does not establish a causal effect.' };
@@ -152,7 +152,8 @@ async function mockPractice(page: Page, options: { denied?: boolean; holdTranscr
     if (path === `/api/practices/${practiceId}/transcriptions`) {
       recordings.push(route.request().postDataBuffer() ?? Buffer.alloc(0));
       if (options.holdTranscription) await transcriptionGate.promise;
-      await fulfill(route, { text: transcript, model: 'mock-only' }).catch(() => {});
+      if (options.failTranscription) await route.fulfill({ status: 503, json: { error: 'Transcription is temporarily unavailable in this test.' } }).catch(() => {});
+      else await fulfill(route, { text: transcript, model: 'mock-only' }).catch(() => {});
       transcriptionResponses += 1;
       return;
     }
@@ -191,6 +192,13 @@ async function beginRecording(page: Page) {
 
 async function settleReact(page: Page) {
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
+function stageResume(page: Page) {
+  return page.getByRole('group', { name: 'Voice session', exact: true }).getByRole('button', { name: 'Resume voice session', exact: true });
+}
+function toolbarResume(page: Page) {
+  return page.getByRole('group', { name: 'Voice session controls', exact: true }).getByRole('button', { name: 'Resume voice session', exact: true });
 }
 
 test('a live voice session hears the question, sends one answer, then automatically starts the next turn', async ({ page }) => {
@@ -237,6 +245,11 @@ test('transcript review is persisted and waits for an explicit submission', asyn
   await page.reload();
   await expect(review).toBeChecked();
   await expect(page.getByLabel('Your answer', { exact: true })).toHaveValue(transcript);
+  await expect(page.getByRole('button', { name: 'Start voice session', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Resume voice session', exact: true })).toHaveCount(0);
+  await settleReact(page);
+  expect((await voiceState(page)).microphoneRequests).toBe(0);
+  expect(mock.questionAudio).toEqual([firstQuestionId]);
   await page.getByRole('button', { name: 'Submit answer', exact: true }).click();
   await expect.poll(() => mock.submissions.length).toBe(1);
   expect(mock.submissions[0].answer).toBe(transcript);
@@ -249,10 +262,14 @@ test('pausing while a transcript is pending prevents its late automatic submissi
     await page.getByRole('button', { name: 'Done speaking', exact: true }).click();
     await expect.poll(() => mock.recordings.length).toBe(1);
     await page.getByRole('button', { name: 'Pause voice session', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Resume voice session', exact: true })).toBeVisible();
+    await expect(stageResume(page)).toBeVisible();
+    await expect(stageResume(page)).toBeDisabled();
+    await expect(toolbarResume(page)).toBeDisabled();
     mock.releaseTranscription();
     await expect.poll(mock.transcriptionResponses).toBe(1);
     await expect(page.getByLabel('Your answer', { exact: true })).toHaveValue(transcript);
+    await expect(stageResume(page)).toBeEnabled();
+    await expect(toolbarResume(page)).toBeEnabled();
     await settleReact(page);
     expect(mock.submissions).toHaveLength(0);
     expect((await voiceState(page)).microphoneRequests).toBe(1);
@@ -270,7 +287,8 @@ test('pausing a pending examiner playback prevents late playback and microphone 
     await page.getByRole('button', { name: 'Pause voice session', exact: true }).click();
     mock.releaseAudio();
     await expect.poll(mock.audioResponses).toBe(1);
-    await expect(page.getByRole('button', { name: 'Resume voice session', exact: true })).toBeVisible();
+    await expect(stageResume(page)).toBeVisible();
+    await expect(toolbarResume(page)).toBeVisible();
     await settleReact(page);
     const state = await voiceState(page);
     expect(state.audioPlays).toBe(0);
@@ -278,6 +296,84 @@ test('pausing a pending examiner playback prevents late playback and microphone 
     expect(state.microphoneRequests).toBe(0);
     expect(mock.submissions).toHaveLength(0);
   } finally { mock.releaseAudio(); }
+});
+
+test('the visible stage Resume restarts a paused ready question without submitting the discarded recording', async ({ page }) => {
+  const mock = await mockPractice(page);
+  await beginRecording(page);
+  await page.getByRole('button', { name: 'Pause voice session', exact: true }).click();
+  await expect(stageResume(page)).toBeVisible();
+  await expect(stageResume(page)).toBeInViewport();
+  await expect(stageResume(page)).toBeEnabled();
+  await expect.poll(async () => (await voiceState(page)).activeTracks).toBe(0);
+  expect(mock.recordings).toHaveLength(0);
+  expect(mock.submissions).toHaveLength(0);
+  await stageResume(page).click();
+  await expect(page.getByRole('button', { name: 'Done speaking', exact: true })).toBeVisible();
+  const resumed = await voiceState(page);
+  expect(resumed.microphoneRequests).toBe(2);
+  expect(resumed.audioEndedAtMicrophone).toEqual([true, true]);
+  expect(mock.questionAudio).toEqual([firstQuestionId, firstQuestionId]);
+  await page.getByRole('button', { name: 'Done speaking', exact: true }).click();
+  await expect.poll(() => mock.submissions.length).toBe(1);
+  expect(mock.submissions[0].answer).toBe(transcript);
+  expect(mock.recordings).toHaveLength(1);
+});
+
+for (const control of ['stage', 'toolbar'] as const) {
+  test(`${control} Resume waits for a paused transcript, then records without overwriting or sending the saved draft`, async ({ page }) => {
+    const mock = await mockPractice(page, { holdTranscription: true });
+    try {
+      await beginRecording(page);
+      await page.getByRole('button', { name: 'Done speaking', exact: true }).click();
+      await expect.poll(() => mock.recordings.length).toBe(1);
+      await page.getByRole('button', { name: 'Pause voice session', exact: true }).click();
+      await expect(stageResume(page)).toBeVisible();
+      await expect(stageResume(page)).toBeDisabled();
+      await expect(toolbarResume(page)).toBeDisabled();
+      await expect(page.getByRole('group', { name: 'Voice session', exact: true })).toContainText('Resume becomes available when it is saved');
+      expect((await voiceState(page)).microphoneRequests).toBe(1);
+      mock.releaseTranscription();
+      await expect(page.getByLabel('Your answer', { exact: true })).toHaveValue(transcript);
+      await expect(stageResume(page)).toBeEnabled();
+      await expect(toolbarResume(page)).toBeEnabled();
+      expect(mock.submissions).toHaveLength(0);
+      await (control === 'stage' ? stageResume(page) : toolbarResume(page)).click();
+      await expect(page.getByRole('button', { name: 'Done speaking', exact: true })).toBeVisible();
+      expect((await voiceState(page)).microphoneRequests).toBe(2);
+      await expect(page.getByLabel('Your answer', { exact: true })).toHaveValue(transcript);
+      expect(mock.submissions).toHaveLength(0);
+      await page.getByRole('button', { name: 'Done speaking', exact: true }).click();
+      await expect.poll(mock.transcriptionResponses).toBe(2);
+      const combined = `${transcript}\n\n${transcript}`;
+      await expect(page.getByLabel('Your answer', { exact: true })).toHaveValue(combined);
+      await settleReact(page);
+      expect(mock.submissions).toHaveLength(0);
+      await page.getByRole('button', { name: 'Submit answer', exact: true }).click();
+      await expect.poll(() => mock.submissions.length).toBe(1);
+      expect(mock.submissions[0].answer).toBe(combined);
+    } finally { mock.releaseTranscription(); }
+  });
+}
+
+test('both Resume controls preserve failed audio until it is retried or explicitly discarded', async ({ page }) => {
+  const mock = await mockPractice(page, { failTranscription: true });
+  await beginRecording(page);
+  await page.getByRole('button', { name: 'Done speaking', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Try transcription again' })).toBeVisible();
+  await page.getByRole('button', { name: 'Pause voice session', exact: true }).click();
+  await expect(stageResume(page)).toBeDisabled();
+  await expect(toolbarResume(page)).toBeDisabled();
+  expect((await voiceState(page)).microphoneRequests).toBe(1);
+  expect(mock.recordings).toHaveLength(1);
+  expect(mock.submissions).toHaveLength(0);
+  await page.getByRole('button', { name: 'Discard audio', exact: true }).click();
+  await expect(stageResume(page)).toBeEnabled();
+  await expect(toolbarResume(page)).toBeEnabled();
+  await toolbarResume(page).click();
+  await expect(page.getByRole('button', { name: 'Done speaking', exact: true })).toBeVisible();
+  expect((await voiceState(page)).microphoneRequests).toBe(2);
+  await page.getByRole('button', { name: 'Stop voice session', exact: true }).click();
 });
 
 test('microphone denial in live practice preserves a working typed submission path', async ({ page }) => {

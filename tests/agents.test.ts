@@ -93,6 +93,59 @@ describe('honest demo and course planning', () => {
     expect(emit.mock.calls[0][0]).toMatchObject({ state: 'limited', label: 'Prepared generic reading prompts' });
   });
 
+  it('keeps PDF pages separate and attaches their explicit page numbers without rewriting the source', async () => {
+    const pages = [
+      '[Page 2]\nAn observed association does not, by itself, establish causation.\n\n',
+      '[Page 5]\nRandom assignment can support a causal interpretation, but only under the stated assumptions.',
+    ];
+    const text = pages.join('');
+    const prepared = await agents.prepareCourse({ text, sourceName: 'lecture.pdf', origin: 'upload' }, 'demo', emit);
+    expect(prepared.excerpts).toEqual([
+      { id: 'note-1', label: 'Page 2 · passage 1', page: 2, text: pages[0] },
+      { id: 'note-2', label: 'Page 5 · passage 1', page: 5, text: pages[1] },
+    ]);
+    expect(prepared.excerpts.map((source) => source.text).join('')).toBe(text);
+    expect(prepared.concepts.every((concept) => prepared.excerpts.some((source) => source.id === concept.sourceId && source.text === concept.sourceQuote))).toBe(true);
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it('chunks an oversized PDF page without splitting a sentence from its qualification or crossing pages', async () => {
+    const longSentence = `Although ${'a measurement may vary with context; '.repeat(55)}this does not establish a causal effect without further assumptions. `;
+    const pageOne = `[Page 1]\nStart with the scope of the claim. ${longSentence}A separate sentence describes the next step.\n\n`;
+    const pageTwo = '[Page 2]\nThis page concerns a different claim and must remain a separate source.';
+    const prepared = await agents.prepareCourse({ text: pageOne + pageTwo, sourceName: 'long-page.pdf', origin: 'upload' }, 'demo', emit);
+    const firstPage = prepared.excerpts.filter((source) => source.page === 1);
+    expect(firstPage.length).toBeGreaterThan(1);
+    expect(firstPage.map((source) => source.text).join('')).toBe(pageOne);
+    expect(firstPage.some((source) => source.text.includes(longSentence))).toBe(true);
+    expect(firstPage.every((source) => source.label.startsWith('Page 1 · passage ') && !source.text.includes('[Page 2]'))).toBe(true);
+    expect(prepared.excerpts.filter((source) => source.page === 2).map((source) => source.text).join('')).toBe(pageTwo);
+    expect(prepared.excerpts.map((source) => source.text).join('')).toBe(pageOne + pageTwo);
+    expect(new Set(prepared.excerpts.map((source) => source.id)).size).toBe(prepared.excerpts.length);
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it('preserves unnumbered prefaces and original PDF line endings without assigning them a page', async () => {
+    const preamble = 'Lecturer introduction: these notes include qualifications.\r\n\r\n';
+    const firstPage = '[Page 3]  \r\nThe model may apply only under these assumptions.\r\n\r\n';
+    const secondPage = '[Page 8]\r\nThe next example does not establish the converse.';
+    const prepared = await agents.prepareCourse({ text: preamble + firstPage + secondPage, origin: 'upload' }, 'demo', emit);
+    expect(prepared.excerpts.map((source) => source.text)).toEqual([preamble, firstPage, secondPage]);
+    expect(prepared.excerpts.map((source) => source.page)).toEqual([undefined, 3, 8]);
+    expect(prepared.excerpts[0].label).toBe('Passage 1');
+  });
+
+  it('leaves plain notes and inline page references unnumbered with their original passage labels', async () => {
+    const firstSentence = `This ordinary note ${'retains its qualification and context; '.repeat(45)}does not refer to a numbered source page. `;
+    const secondSentence = 'The citation [Page 9] appears inline and must not create page metadata.';
+    const prepared = await agents.prepareCourse({ text: firstSentence + secondSentence, sourceName: 'notes.txt', origin: 'upload' }, 'demo', emit);
+    expect(prepared.excerpts).toEqual([
+      { id: 'note-1', label: 'Passage 1', text: firstSentence },
+      { id: 'note-2', label: 'Passage 2', text: secondSentence },
+    ]);
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
   it('resolves planner source IDs to original quotes instead of asking the model to copy them', async () => {
     enable();
     const plan = planner();
