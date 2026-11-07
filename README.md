@@ -27,6 +27,10 @@ pnpm build
 pnpm start
 ```
 
+## Share a demo link
+
+For a temporary HTTPS link that others can open today, see [public demo setup](docs/DEPLOYMENT.md). The demo launcher runs a separate production server and needs this computer to remain awake and online.
+
 ## What to try
 
 1. Choose the statistics or cell biology sample, or import a selectable-text PDF, text file, Markdown file, or pasted notes.

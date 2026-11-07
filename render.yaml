@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: blurtreply-demo
+    runtime: node
+    plan: free
+    region: frankfurt
+    autoDeployTrigger: "off"
+    buildCommand: npx --yes pnpm@11.25.0 install --frozen-lockfile --prod=false && npx --yes pnpm@11.25.0 build
+    startCommand: node --import tsx server/index.ts
+    healthCheckPath: /api/status
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: VIVACOACH_HOST
+        value: 0.0.0.0
+      - key: VIVACOACH_PUBLIC_DEMO
+        value: "true"
+      - key: VIVACOACH_DB_PATH
+        value: /tmp/blurtreply-demo.sqlite
+      # Starts as the free guided demo. Add provider keys through Render's
+      # secret settings and enable live AI only when approved for public use.
+      - key: VIVACOACH_LIVE_AI
+        value: "false"
+      - key: VIVACOACH_MAX_AI_CALLS
+        value: "60"
+      - key: VIVACOACH_MAX_TRANSCRIPTIONS
+        value: "12"
+      - key: VIVACOACH_MAX_VOICE_CALLS
+        value: "30"
