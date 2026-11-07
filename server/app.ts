@@ -7,7 +7,7 @@ import type { ServerStatus } from '../shared/types';
 import { getAnalysisStatus } from './analysis';
 import { HttpError } from './errors';
 import { RoomService, type RoomServiceOptions } from './rooms';
-import { getOrCreateSession } from './sessions';
+import { getExistingSession, getOrCreateSession } from './sessions';
 import { Store } from './store';
 
 export interface AppOptions extends RoomServiceOptions {
@@ -31,6 +31,13 @@ const actionSchema = z.object({
   action: z.enum(['analyse', 'reveal', 'publish-pairs', 'start-retest', 'show-results', 'close', 'restart-demo', 'fallback-pairs']),
   version: z.number().int().positive().optional(),
 }).strict();
+
+function requireExistingSession(sessionId: string | null): string {
+  if (!sessionId) {
+    throw new HttpError(403, 'Open the browser you used for this room, or join before responding.', 'SESSION_REQUIRED');
+  }
+  return sessionId;
+}
 
 export function createApp(options: AppOptions = {}) {
   const app = express();
@@ -95,7 +102,7 @@ export function createApp(options: AppOptions = {}) {
   app.use('/api', express.json({ limit: '24kb' }));
   app.use('/api', cookieParser());
   app.use('/api', (req, res, next) => {
-    res.locals.sessionId = getOrCreateSession(store, req, res, options.secureCookies ?? false);
+    res.locals.sessionId = getExistingSession(store, req);
     next();
   });
 
@@ -108,7 +115,9 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get('/api/lessons', (_req, res) => res.json(LESSONS.map(toPublicLesson)));
   app.post('/api/rooms', (req, res) => {
-    res.status(201).json(rooms.create(res.locals.sessionId, creationSchema.parse(req.body)));
+    const input = creationSchema.parse(req.body);
+    const sessionId = getOrCreateSession(store, req, res, options.secureCookies ?? false);
+    res.status(201).json(rooms.create(sessionId, input));
   });
   app.get('/api/rooms/:code', (req, res) => {
     const code = codeSchema.parse(req.params.code);
@@ -117,19 +126,21 @@ export function createApp(options: AppOptions = {}) {
   });
   app.post('/api/rooms/:code/join', (req, res) => {
     z.object({}).strict().parse(req.body);
-    res.json(rooms.join(codeSchema.parse(req.params.code), res.locals.sessionId));
+    const code = codeSchema.parse(req.params.code);
+    const sessionId = getOrCreateSession(store, req, res, options.secureCookies ?? false);
+    res.json(rooms.join(code, sessionId));
   });
   app.post('/api/rooms/:code/responses', (req, res) => {
-    res.json(rooms.submit(codeSchema.parse(req.params.code), res.locals.sessionId, responseSchema.parse(req.body)));
+    res.json(rooms.submit(codeSchema.parse(req.params.code), requireExistingSession(res.locals.sessionId), responseSchema.parse(req.body)));
   });
   app.post('/api/rooms/:code/clarification', (req, res) => {
     const body = z.object({ text: z.string().trim().min(1).max(1200) }).strict().parse(req.body);
-    res.json(rooms.clarify(codeSchema.parse(req.params.code), res.locals.sessionId, body.text));
+    res.json(rooms.clarify(codeSchema.parse(req.params.code), requireExistingSession(res.locals.sessionId), body.text));
   });
   app.post('/api/rooms/:code/actions', async (req, res, next) => {
     try {
       const body = actionSchema.parse(req.body);
-      res.json(await rooms.action(codeSchema.parse(req.params.code), res.locals.sessionId, body.action, body.version));
+      res.json(await rooms.action(codeSchema.parse(req.params.code), requireExistingSession(res.locals.sessionId), body.action, body.version));
     } catch (error) { next(error); }
   });
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'That API route does not exist.', 'NOT_FOUND')));

@@ -63,7 +63,7 @@ export class RoomService {
     return lesson;
   }
 
-  private owner(room: RoomRow, sessionId: string) {
+  private owner(room: RoomRow, sessionId: string | null) {
     if (room.owner_session_id !== sessionId) {
       throw new HttpError(403, 'Only the lecturer who created this room can control it.', 'HOST_REQUIRED');
     }
@@ -91,7 +91,8 @@ export class RoomService {
       .map(responseDTO);
   }
 
-  private member(code: string, sessionId: string): ParticipantRow | undefined {
+  private member(code: string, sessionId: string | null): ParticipantRow | undefined {
+    if (!sessionId) return undefined;
     return this.store.get<ParticipantRow>('SELECT * FROM participants WHERE room_code = ? AND session_id = ?', code, sessionId);
   }
 
@@ -193,9 +194,8 @@ export class RoomService {
         throw new HttpError(409, 'Your response is already submitted. It stays unchanged so the discussion has a stable starting point.', 'ALREADY_SUBMITTED');
       }
       this.requirePhase(room, input.stage === 'initial' ? ['collecting'] : ['retest']);
-      if (input.stage === 'transfer' && !this.store.get(
-        "SELECT id FROM responses WHERE participant_id = ? AND stage = 'initial'", participant.id,
-      )) throw new HttpError(409, 'A first response is required before the transfer question.', 'INITIAL_REQUIRED');
+      // An existing participant can still take the fresh question after missing the first round.
+      // Result comparisons use the actual intersection of respondents, never an invented first answer.
       const question = input.stage === 'initial' ? this.lesson(room).initial : this.lesson(room).transfer;
       if (!question.options.some(option => option.id === input.choiceId)) {
         throw new HttpError(400, 'Choose one of the options in this question.', 'INVALID_CHOICE');
@@ -382,7 +382,7 @@ export class RoomService {
     };
   }
 
-  snapshot(code: string, sessionId: string, view: View = 'student'): RoomSnapshot {
+  snapshot(code: string, sessionId: string | null, view: View = 'student'): RoomSnapshot {
     const room = this.room(code);
     if (view === 'host') this.owner(room, sessionId);
     const isHost = view === 'host';

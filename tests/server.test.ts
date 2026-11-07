@@ -75,6 +75,49 @@ afterEach(async () => {
 });
 
 describe('anonymous ownership and privacy', () => {
+  it('never creates or replaces identity cookies on public reads or unauthorised mutations', async () => {
+    const f = await fixture();
+    const guest = f.browser();
+    // Home starts both requests together. Neither late response may overwrite a newer host cookie.
+    const publicReads = await Promise.all([guest.get('/api/status'), guest.get('/api/lessons')]);
+    expect(publicReads.every(result => result.status === 200 && !result.headers.has('set-cookie'))).toBe(true);
+    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM sessions')!.count).toBe(0);
+
+    const host = f.browser();
+    const room = await createRoom(host);
+    const hostCookie = host.cookie;
+    const latePublicRead = await guest.get('/api/status');
+    expect(latePublicRead.headers.has('set-cookie')).toBe(false);
+    expect((await host.get(`/api/rooms/${room.code}?view=host`)).status).toBe(200);
+    expect(host.cookie).toBe(hostCookie);
+
+    for (const view of ['student', 'board']) {
+      const snapshot = await guest.get(`/api/rooms/${room.code}?view=${view}`);
+      expect(snapshot.status).toBe(200);
+      expect(snapshot.headers.has('set-cookie')).toBe(false);
+      expect(snapshot.data.self).toBeNull();
+      expect(snapshot.data.isHost).toBe(false);
+      expect(snapshot.data).not.toHaveProperty('host');
+    }
+    expect((await guest.get(`/api/rooms/${room.code}?view=host`)).status).toBe(403);
+    const forbidden = await Promise.all([
+      guest.post(`/api/rooms/${room.code}/actions`, { action: 'close' }),
+      guest.post(`/api/rooms/${room.code}/responses`, { stage: 'initial', choiceId: lesson.initial.options[0].id, reason: 'A guest cannot submit.' }),
+      guest.post(`/api/rooms/${room.code}/clarification`, { text: 'A guest cannot clarify.' }),
+    ]);
+    expect(forbidden.every(result => result.status === 403 && !result.headers.has('set-cookie'))).toBe(true);
+    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM sessions')!.count).toBe(1);
+
+    guest.cookie = 'pairwise_session=invalid';
+    expect((await guest.get('/api/status')).headers.has('set-cookie')).toBe(false);
+    const joined = await guest.post(`/api/rooms/${room.code}/join`, {});
+    expect(joined.status).toBe(200);
+    expect(joined.headers.has('set-cookie')).toBe(true);
+    expect((await guest.get(`/api/rooms/${room.code}?view=student`)).data.self.participant.id)
+      .toBe(joined.data.self.participant.id);
+    expect(f.store.get<{ count: number }>('SELECT COUNT(*) AS count FROM sessions')!.count).toBe(2);
+  });
+
   it('uses a hashed HttpOnly session, rejoins one identity, and rejects host impersonation', async () => {
     const f = await fixture();
     const host = f.browser();
@@ -223,6 +266,41 @@ describe('room state and independent responses', () => {
     await action(host, room.code, 'reveal');
     const revealed = await host.get(`/api/rooms/${room.code}?view=board`);
     expect(revealed.data.summary.examples[0].after).toBe(transfer.reason);
+  });
+
+  it('accepts fresh responses from existing participants who missed round one without inventing matched results', async () => {
+    const f = await fixture();
+    const host = f.browser();
+    const room = await createRoom(host);
+    const both = f.browser();
+    const initialOnly = f.browser();
+    const transferOnly = f.browser();
+    const original = await joinAndAnswer(both, room.code, 'My first explanation, before discussion.');
+    await joinAndAnswer(initialOnly, room.code, 'I will answer only the first question.');
+    const joined = await transferOnly.post(`/api/rooms/${room.code}/join`, {});
+    expect(joined.status).toBe(200);
+    const transfer = { stage: 'transfer', choiceId: lesson.transferExpectedChoiceId, reason: 'My fresh explanation after missing the first round.' };
+    expect((await transferOnly.post(`/api/rooms/${room.code}/responses`, transfer)).status).toBe(409);
+
+    await action(host, room.code, 'fallback-pairs');
+    await action(host, room.code, 'publish-pairs');
+    await action(host, room.code, 'start-retest');
+    const submitted = await transferOnly.post(`/api/rooms/${room.code}/responses`, transfer);
+    expect(submitted.status).toBe(200);
+    expect(submitted.data.self.initial).toBeNull();
+    expect(submitted.data.self.transfer.reason).toBe(transfer.reason);
+    expect((await transferOnly.post(`/api/rooms/${room.code}/responses`, transfer)).data.transferCount).toBe(1);
+    await both.post(`/api/rooms/${room.code}/responses`, { ...transfer, reason: 'My second explanation, with a first response to compare.' });
+    const peer = await initialOnly.get(`/api/rooms/${room.code}?view=student`);
+    expect(JSON.stringify(peer.data)).not.toContain(transfer.reason);
+
+    const results = await action(host, room.code, 'show-results');
+    expect(results.data.summary).toMatchObject({ initialTotal: 2, transferTotal: 2, matchedRespondents: 1, transferExpected: 2 });
+    expect(results.data.summary.examples).toHaveLength(1);
+    expect(results.data.summary.examples[0].before).toBe(original.answer.reason);
+    expect(results.data.summary.examples[0].alias).toBe(original.participant.alias);
+    expect(results.data.host.responses.filter((response: any) => response.participantId === joined.data.self.participant.id))
+      .toHaveLength(1);
   });
 
   it('does not fabricate demo responses or transfer results for real participants', async () => {
