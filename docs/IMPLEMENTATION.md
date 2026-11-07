@@ -24,7 +24,7 @@ Warm paper workspaces, an ink-dark presentation wall, electric vermilion actions
 - [x] Integration, failure-path tests, keyboard controls and browser inspection.
 - [x] Local launch instructions and concise demo script.
 - [x] Final source, local launch guide and demo script backed up to GitHub.
-- [ ] CI confirmation on the final source revision.
+- [x] CI confirmation on the final source revision (`746b9ac`).
 
 Live provider verification remains separate: credentials and a testing budget are still required. The complete local demo and fallback classroom flow run without them.
 

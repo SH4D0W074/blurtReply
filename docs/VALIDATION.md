@@ -4,6 +4,8 @@
 
 Local result on 7 November 2026: **46 unit/integration tests and five browser scenarios passed**, along with TypeScript checking and the production build. Browser verification used installed Chrome on macOS; Safari and Firefox were not tested.
 
+[GitHub CI also passed on source revision `746b9ac`](https://github.com/SH4D0W074/pairwise/actions/runs/42383823120), including a clean dependency install, TypeScript, the unit/integration suite, production build and all five browser scenarios using Chromium on Linux. Subsequent documentation-only updates do not rerun this workflow.
+
 - TypeScript checks the frontend, server and shared contracts.
 - Unit tests exercise authored lessons, model output validation, exact evidence provenance, malformed/refused/timeout responses, supported model parameters, response caps and deterministic grouping.
 - HTTP integration tests exercise persistent sessions, role filtering, host-only controls, invalid inputs, duplicate responses, stale transitions, clarification invalidation and private source paths.
