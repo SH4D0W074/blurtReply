@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import { posix } from 'node:path';
 import { z } from 'zod';
 import type { ServerStatus } from '../shared/types';
+import { getSpokenPrompt } from '../shared/conversation';
 import { getTextAIStatus } from './agents';
 import { getSamples } from './courses';
 import { getVoiceStatus, transcribeAudio, speakQuestion, VoiceError } from './voice';
@@ -155,10 +156,12 @@ export function createApp(options: AppOptions = {}) {
       const { questionId } = z.object({ questionId: z.string().uuid() }).strict().parse(req.body);
       const state = practices.snapshot(practiceId.parse(req.params.id), res.locals.ownerId);
       if (state.mode === 'demo') throw new HttpError(409, 'The free demo uses the voice available on your device.', 'DEMO_AUDIO');
-      if (state.phase !== 'ready' || state.currentQuestion?.id !== questionId) {
-        throw new HttpError(409, 'That question is no longer active.', 'STALE_QUESTION');
+      const prompt = getSpokenPrompt(state);
+      if (!prompt || prompt.id !== questionId) {
+        throw new HttpError(409, 'That part of the conversation is no longer active.', 'STALE_QUESTION');
       }
-      const audio = await speak(state.currentQuestion.text, `${state.id}:${questionId}`);
+      // Clients choose a saved turn, never arbitrary text to send to the speech provider.
+      const audio = await speak(prompt.text, `${state.id}:${questionId}`);
       res.type('audio/mpeg').send(audio);
     } catch (error) { next(error); }
   });

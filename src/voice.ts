@@ -168,14 +168,14 @@ interface PlaybackAttempt {
   deviceStarted: boolean;
 }
 
-export function useQuestionVoice(id: string, question: Question | null, mode: 'demo' | 'live', status: ServerStatus | null) {
+export function useQuestionVoice(id: string, question: Question | null, mode: 'demo' | 'live', status: ServerStatus | null, speechText = question?.text ?? '') {
   const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle');
   const [source, setSource] = useState<PlaybackSource>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const active = useRef<PlaybackAttempt | null>(null);
   const alive = useRef(true);
-  const input = useRef({ id, question, mode, status });
-  input.current = { id, question, mode, status };
+  const input = useRef({ id, question, mode, status, speechText });
+  input.current = { id, question, mode, status, speechText };
   const releasePlayer = useCallback((attempt: PlaybackAttempt) => {
     const player = attempt.player; attempt.player = null;
     if (player) {
@@ -206,13 +206,13 @@ export function useQuestionVoice(id: string, question: Question | null, mode: 'd
     else if (alive.current) setState('idle');
   }, [settle]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; stop(); }; }, [stop]);
-  useEffect(() => { stop(); setSource(null); setNotice(null); }, [id, question?.id, question?.text, mode, stop]);
+  useEffect(() => { stop(); setSource(null); setNotice(null); }, [id, question?.id, question?.text, speechText, mode, stop]);
 
   const play = useCallback((): Promise<PlaybackResult> => {
     if (!alive.current) return Promise.resolve('cancelled');
-    const { id: practiceId, question: currentQuestion, mode: currentMode, status: currentStatus } = input.current;
-    if (!currentQuestion) return Promise.resolve('unavailable');
-    const key = `${practiceId}:${currentQuestion.id}:${currentMode}`;
+    const { id: practiceId, question: currentQuestion, mode: currentMode, status: currentStatus, speechText: currentText } = input.current;
+    if (!currentQuestion || !currentText.trim()) return Promise.resolve('unavailable');
+    const key = `${practiceId}:${currentQuestion.id}:${currentMode}:${currentText}`;
     if (active.current?.key === key) return active.current.completion.promise;
     stop();
     const attempt: PlaybackAttempt = { key, completion: deferred<PlaybackResult>(), controller: null, player: null, objectUrl: null, utterance: null, deviceStarted: false };
@@ -226,11 +226,11 @@ export function useQuestionVoice(id: string, question: Question | null, mode: 'd
       releasePlayer(attempt);
       if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
         setSource('unavailable');
-        setNotice(useElevenLabs ? 'ElevenLabs audio is unavailable, and this browser has no device voice. You can read the full question above.' : 'Device voice isn’t available in this browser. The full question is shown above.');
+        setNotice(useElevenLabs ? 'ElevenLabs audio is unavailable, and this browser has no device voice. You can read the conversation above.' : 'Device voice isn’t available in this browser. The conversation is shown above.');
         settle(attempt, 'unavailable'); return;
       }
       try {
-        const utterance = new SpeechSynthesisUtterance(currentQuestion.text); attempt.utterance = utterance;
+        const utterance = new SpeechSynthesisUtterance(currentText); attempt.utterance = utterance;
         utterance.lang = 'en-GB'; utterance.rate = .94;
         const voice = window.speechSynthesis.getVoices().find(candidate => candidate.lang === 'en-GB');
         if (voice) utterance.voice = voice;
@@ -239,7 +239,7 @@ export function useQuestionVoice(id: string, question: Question | null, mode: 'd
           if (!isCurrent()) return;
           if (event.error === 'canceled' || event.error === 'interrupted') settle(attempt, 'cancelled');
           else {
-            setSource('unavailable'); setNotice('The device voice couldn’t play. You can read the full question above.');
+            setSource('unavailable'); setNotice('The device voice couldn’t play. You can read the conversation above.');
             settle(attempt, 'unavailable');
           }
         };
@@ -248,7 +248,7 @@ export function useQuestionVoice(id: string, question: Question | null, mode: 'd
         window.speechSynthesis.speak(utterance);
       } catch {
         if (!isCurrent()) return;
-        setSource('unavailable'); setNotice('The device voice couldn’t play. You can read the full question above.');
+        setSource('unavailable'); setNotice('The device voice couldn’t play. You can read the conversation above.');
         settle(attempt, 'unavailable');
       }
     };

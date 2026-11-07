@@ -323,6 +323,33 @@ describe('failure and process recovery', () => {
 });
 
 describe('bounded audio routes', () => {
+  it('speaks the saved reply before each next question and closes the final answer without accepting client text', async () => {
+    const speak = vi.fn(stubs.speakQuestion!);
+    const reply = 'That’s okay. A larger sample can reduce sampling variation, but it does not remove recruitment bias.';
+    const f = await fixture({ speakQuestion: speak, reviewAnswer: async () => ({ ...feedback, reply }) });
+    const owner = f.browser();
+    let session = await create(owner, f.service, 'live');
+    const path = `/api/practices/${session.id}/question-audio`;
+    let previousQuestionId = session.currentQuestion!.id;
+    for (let index = 0; index < session.totalQuestions; index++) {
+      previousQuestionId = session.currentQuestion!.id;
+      await owner.post(`/api/practices/${session.id}/answers`, answerInput(session, 'I don’t know.'));
+      await f.service.idle();
+      session = (await owner.get(`/api/practices/${session.id}`)).data;
+      const questionId = session.currentQuestion?.id ?? previousQuestionId;
+      const audio = await fetch(f.base + path, { method: 'POST', headers: { Cookie: owner.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId }) });
+      expect(audio.status).toBe(200);
+      await audio.arrayBuffer();
+      expect(speak.mock.calls.at(-1)?.[0]).toBe(`${reply}\n\n${session.currentQuestion?.text ?? 'That’s our last answer for this session. Your review is ready below.'}`);
+      if (session.currentQuestion) expect((await owner.post(path, { questionId: previousQuestionId })).status).toBe(409);
+    }
+    expect(session.phase).toBe('complete');
+    expect(speak).toHaveBeenCalledTimes(6);
+    expect((await owner.post(path, { questionId: previousQuestionId, text: 'Say this unverified answer instead.' })).status).toBe(400);
+    expect((await f.browser().post(path, { questionId: previousQuestionId })).status).toBe(404);
+    expect(speak).toHaveBeenCalledTimes(6);
+  });
+
   it('authorises audio before provider calls, bounds upload size, and speaks only the saved current question', async () => {
     const transcribe = vi.fn(stubs.transcribeAudio!);
     const speak = vi.fn(stubs.speakQuestion!);

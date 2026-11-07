@@ -34,6 +34,7 @@ function limitedFeedback(note: string): Feedback {
   return {
     assessment: 'unclear', claimQuote: null, sourceId: null, sourceQuote: null,
     observation: note,
+    reply: 'I couldn’t check that answer just now. Your words are saved; let’s use your course notes to work through the idea.',
     followUp: 'Explain the idea again in your own words. Which part of your course material supports your explanation?',
     followUpKind: 'probe', source: 'fallback', reviewStatus: 'unavailable',
   };

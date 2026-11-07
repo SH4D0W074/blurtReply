@@ -66,7 +66,7 @@ The agents share structured state through the server. Each has a separate prompt
 
 ## Voice and cost controls
 
-OpenAI `gpt-transcribe` transcribes bounded recordings. ElevenLabs can speak the examiner's opening questions and adaptive follow-ups; the four agents still decide what to ask and how to assess the answer.
+OpenAI `gpt-transcribe` transcribes bounded recordings. ElevenLabs can speak the examiner's response to each answer followed by the next question; the four agents still decide what to explain, ask and assess. When you say “I don’t know” or ask for clarification, the examiner offers a short explanation from your notes and a simpler follow-up, with an independent check before playback.
 
 To enable ElevenLabs:
 
@@ -75,9 +75,9 @@ To enable ElevenLabs:
 3. Keep `VIVACOACH_LIVE_AI=true`, restart the server, and refresh the browser.
 4. Start a **live practice** and select **Start voice session**, or use **Hear the question** for manual playback. The playback label names ElevenLabs, or explicitly identifies device fallback if synthesis or playback fails.
 
-The key stays on the server. Only the current saved question can be synthesised. The default `eleven_multilingual_v2` model uses stability 0.4 for more variation in delivery, with 44.1 kHz / 128 kbps MP3 audio. Set `ELEVENLABS_MODEL_ID=eleven_flash_v2_5` for lower latency and cost; these are the two supported models. [ElevenLabs describes the quality and latency tradeoff](https://elevenlabs.io/docs/overview/models).
+The key stays on the server. Only the current saved conversation prompt can be synthesised: the latest response followed by the question, or a closing response after the final answer. Both parts finish before the microphone opens; final-response playback never opens it. The default `eleven_multilingual_v2` model uses stability 0.4 for more variation in delivery, with 44.1 kHz / 128 kbps MP3 audio. Set `ELEVENLABS_MODEL_ID=eleven_flash_v2_5` for lower latency and cost; these are the two supported models. [ElevenLabs describes the quality and latency tradeoff](https://elevenlabs.io/docs/overview/models).
 
-Audio is generated on demand and cached in memory; replaying a cached question makes no new provider request, including after the generation cap is reached. The cache includes the voice, model and audio settings, so changing them never reuses stale audio. Cache entries can expire through eviction or server restart. **Cancel playback** stops a pending playback; a generation already sent to ElevenLabs may still be billed. Without a key, and in the free guided demo, the app uses device speech.
+Audio is generated on demand and cached in memory; replaying a cached conversation prompt makes no new provider request, including after the generation cap is reached. A response and its next question share one synthesis request. The cache includes the text, voice, model and audio settings, so changing them never reuses stale audio. Cache entries can expire through eviction or server restart. **Cancel playback** stops a pending playback; a generation already sent to ElevenLabs may still be billed. Without a key, and in the free guided demo, the app uses device speech.
 
 Default caps per server process are 60 text model requests, 12 transcription requests, and 30 ElevenLabs requests. Failed attempts count. Calls have deadlines and no automatic retries. A practice has at most six submitted answers. The UI caps recordings at 90 seconds; the server caps audio at 2 MB, material at 30,000 characters, and each answer at 2,500 characters. Restarting the server resets request counters; these are usage limits, not a billing dashboard.
 
@@ -85,7 +85,7 @@ Default caps per server process are 60 text model requests, 12 transcription req
 
 The app binds to this computer by default. An anonymous browser cookie owns its saved sessions. SQLite data lives in `.local/vivacoach.sqlite`; material, answers, and feedback stay out of Git. The app does not write recordings to disk.
 
-**Local hosting does not mean offline AI.** In live mode, relevant course text and answers go to OpenAI, and recordings go to OpenAI for transcription. Optional ElevenLabs playback sends the examiner question to ElevenLabs. Device speech is managed by the browser and operating system.
+**Local hosting does not mean offline AI.** In live mode, relevant course text and answers go to OpenAI, and recordings go to OpenAI for transcription. Optional ElevenLabs playback sends examiner replies and questions to ElevenLabs; these replies can reflect your notes and answer. Device speech is managed by the browser and operating system.
 
 This prototype supports English revision with selectable text, not OCR, diagrams, mathematical notation reconstruction, or formal grading. A checked quote proves where the text came from, not that every interpretation is correct. Feedback remains provisional and tied to the uploaded source; incorrect notes can lead to incorrect guidance. The six-answer structure is deliberately small enough for a reliable hackathon demo.
 

@@ -19,6 +19,8 @@ export interface Question { id: string; number: number; text: string; conceptId:
 export type Assessment = 'supported' | 'partial' | 'revisit' | 'unclear';
 export interface Feedback {
   assessment: Assessment; claimQuote: string | null; sourceId: string | null; sourceQuote: string | null;
+  /** Conversational response; absent on practices saved before this field was introduced. */
+  reply?: string;
   observation: string; followUp: string; followUpKind: 'probe' | 'transfer';
   source: 'ai' | 'demo' | 'fallback'; reviewStatus: 'checked' | 'needs-review' | 'unavailable';
 }

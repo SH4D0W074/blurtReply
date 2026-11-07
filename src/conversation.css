@@ -1,0 +1,23 @@
+.conversation-reply { margin: 0 0 28px; padding: 2px 0 19px 20px; border-left: 2px solid var(--accent); }
+.conversation-reply__heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px 18px; margin-bottom: 12px; }
+.conversation-reply__heading > span:last-child { color: var(--quiet); font-size: 9px; }
+.conversation-reply > p { font-family: var(--display); font-size: clamp(24px, 2.1vw, 30px); line-height: 1.28; color: #dedff0; max-width: 900px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-reply__heading .eyebrow { color: var(--accent-bright); }
+.completed-reply { margin-bottom: 34px; padding-bottom: 27px; border-bottom: 1px solid var(--line); }
+.completed-reply .conversation-reply { margin-bottom: 0; padding-bottom: 5px; }
+.completed-reply__playback { display: flex; align-items: center; flex-wrap: wrap; gap: 19px; padding-left: 22px; margin-top: 5px; }
+.completed-reply__playback > span { color: var(--quiet); font-size: 9px; }
+.completed-reply__closing { color: var(--muted); font-size: 12px; margin: 8px 0 0 22px; line-height: 1.8; }
+.completed-reply > .voice-notice { margin-left: 22px; }
+.evidence__reply { margin: 0 0 18px; padding-bottom: 17px; border-bottom: 1px solid var(--line); }
+.evidence__reply > p { color: #d7dbe7; font-size: 13px; line-height: 1.8; margin-top: 7px; white-space: pre-wrap; }
+.practice-page--complete .voice-session-toolbar { margin-bottom: 0; }
+@media (max-width: 550px) {
+  .conversation-reply { padding-left: 14px; margin-bottom: 22px; }
+  .conversation-reply > p { font-size: 25px; line-height: 1.28; }
+  .conversation-reply__heading { gap: 6px 12px; }
+  .conversation-reply__heading > span:last-child { font-size: 8px; }
+  .completed-reply { margin-bottom: 26px; padding-bottom: 22px; }
+  .completed-reply__playback { padding-left: 16px; gap: 14px; }
+  .completed-reply__closing, .completed-reply > .voice-notice { margin-left: 16px; }
+}

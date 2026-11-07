@@ -1,10 +1,13 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
-import type { PracticeSession, ServerStatus } from '../../shared/types';
+import type { PracticeSession, ServerStatus, Turn } from '../../shared/types';
 
 const practiceId = '11111111-1111-4111-8111-111111111111';
 const firstQuestionId = '22222222-2222-4222-8222-222222222222';
 const secondQuestionId = '33333333-3333-4333-8333-333333333333';
 const transcript = 'An association alone cannot establish that one variable causes the other.';
+const nextQuestionText = 'How could a common cause change the interpretation?';
+const unsureReply = 'That is a useful place to begin. An association means two things vary together; it does not establish what causes the change.';
+const closingReply = 'You have finished this practice. Revisit the difference between an association and a causal explanation, then try a fresh example.';
 
 function wavFixture(duration = 0.4) {
   const rate = 8000;
@@ -21,17 +24,19 @@ function wavFixture(duration = 0.4) {
 
 interface BrowserVoiceState {
   microphoneRequests: number; activeTracks: number; recorderStarts: number;
-  audioPlays: number; deviceCalls: number; timeline: string[]; audioEndedAtMicrophone: boolean[];
+  audioPlays: number; deviceCalls: number; deviceTexts: string[]; timeline: string[]; audioEndedAtMicrophone: boolean[];
 }
 
-async function installMicrophone(page: Page, denied = false) {
-  await page.addInitScript(({ wavBase64, denied }) => {
+async function installMicrophone(page: Page, denied = false, holdDeviceSpeech = false) {
+  await page.addInitScript(({ wavBase64, denied, holdDeviceSpeech }) => {
     const state: BrowserVoiceState = {
-      microphoneRequests: 0, activeTracks: 0, recorderStarts: 0, audioPlays: 0, deviceCalls: 0, timeline: [], audioEndedAtMicrophone: [],
+      microphoneRequests: 0, activeTracks: 0, recorderStarts: 0, audioPlays: 0, deviceCalls: 0, deviceTexts: [], timeline: [], audioEndedAtMicrophone: [],
     };
     Object.assign(window, { voiceFlow: state });
     const bytes = Uint8Array.from(atob(wavBase64), character => character.charCodeAt(0));
     let lastQuestionAudio: HTMLMediaElement | null = null;
+    let latestPlayback: 'audio' | 'device' = 'audio';
+    let deviceEnded = false;
     const completedAudio = new WeakSet<HTMLMediaElement>();
 
     // The analyser receives a real MediaStream; the recorder returns deterministic valid PCM.
@@ -39,7 +44,7 @@ async function installMicrophone(page: Page, denied = false) {
     navigator.mediaDevices.getUserMedia = async () => {
       state.microphoneRequests += 1;
       state.timeline.push('microphone-request');
-      state.audioEndedAtMicrophone.push(Boolean(lastQuestionAudio && completedAudio.has(lastQuestionAudio)));
+      state.audioEndedAtMicrophone.push(latestPlayback === 'device' ? deviceEnded : Boolean(lastQuestionAudio && completedAudio.has(lastQuestionAudio)));
       if (denied) throw new DOMException('Denied by the browser test', 'NotAllowedError');
       const context = new AudioContext();
       const oscillator = context.createOscillator();
@@ -82,7 +87,9 @@ async function installMicrophone(page: Page, denied = false) {
     Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: DeterministicRecorder });
     const originalPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = async function () {
+      latestPlayback = 'audio';
       lastQuestionAudio = this;
+      Object.assign(window, { lastVoiceFlowAudio: this });
       state.timeline.push('question-play');
       // Capture before the app's onended cleanup resets src/ended and resolves its playback promise.
       this.addEventListener('ended', () => { completedAudio.add(this); state.timeline.push('question-ended'); }, { once: true, capture: true });
@@ -93,10 +100,17 @@ async function installMicrophone(page: Page, denied = false) {
       cancel() {}, getVoices() { return []; },
       speak(utterance: SpeechSynthesisUtterance) {
         state.deviceCalls += 1;
-        window.setTimeout(() => utterance.onend?.(new Event('end') as SpeechSynthesisEvent), 20);
+        state.deviceTexts.push(utterance.text);
+        latestPlayback = 'device'; deviceEnded = false; state.timeline.push('device-started');
+        const finish = () => {
+          deviceEnded = true; state.timeline.push('device-ended');
+          utterance.onend?.(new Event('end') as SpeechSynthesisEvent);
+        };
+        Object.assign(window, { finishDeviceSpeech: finish });
+        if (!holdDeviceSpeech) window.setTimeout(finish, 20);
       },
     } });
-  }, { wavBase64: wavFixture().toString('base64'), denied });
+  }, { wavBase64: wavFixture().toString('base64'), denied, holdDeviceSpeech });
 }
 
 async function voiceState(page: Page): Promise<BrowserVoiceState> {
@@ -111,15 +125,23 @@ function gate() {
 
 interface Submission { questionId: string; answer: string; idempotencyKey: string }
 
-async function mockPractice(page: Page, options: { denied?: boolean; holdTranscription?: boolean; holdAudio?: boolean; failTranscription?: boolean } = {}) {
-  await installMicrophone(page, options.denied);
+async function mockPractice(page: Page, options: {
+  denied?: boolean; holdTranscription?: boolean; holdAudio?: boolean; failTranscription?: boolean;
+  holdReplyAudio?: boolean; failReplyAudio?: boolean; holdDeviceSpeech?: boolean; transcriptText?: string; finalQuestion?: boolean;
+} = {}) {
+  await installMicrophone(page, options.denied, options.holdDeviceSpeech);
   const timestamp = '2026-11-07T12:00:00.000Z';
   const source = { id: 'association', label: 'Association and causation', text: 'Correlation describes an association. An association alone does not establish a causal effect.' };
-  const firstQuestion = { id: firstQuestionId, number: 1, text: 'What does an association establish, and what does it leave unresolved?', conceptId: 'association', kind: 'explain' as const };
+  const firstQuestion = { id: firstQuestionId, number: options.finalQuestion ? 6 : 1, text: 'What does an association establish, and what does it leave unresolved?', conceptId: 'association', kind: 'explain' as const };
+  const previousTurns: Turn[] = options.finalQuestion ? Array.from({ length: 5 }, (_, index) => ({
+    id: `previous-turn-${index + 1}`, question: { ...firstQuestion, id: `previous-question-${index + 1}`, number: index + 1 },
+    answer: 'A previous saved answer in this test fixture.', createdAt: timestamp,
+    feedback: { assessment: 'unclear', claimQuote: null, sourceId: source.id, sourceQuote: source.text, observation: 'Previous test feedback.', followUp: firstQuestion.text, followUpKind: 'probe', source: 'fallback', reviewStatus: 'unavailable' },
+  })) : [];
   let session: PracticeSession = {
     id: practiceId, mode: 'live', phase: 'ready', version: 1, totalQuestions: 6,
     createdAt: timestamp, updatedAt: timestamp, pendingAnswer: null, message: null, demoAnswer: null,
-    turns: [], events: [], review: null, currentQuestion: firstQuestion,
+    turns: previousTurns, events: [], review: null, currentQuestion: firstQuestion,
     course: {
       title: 'Association and evidence', subject: 'Statistics', sourceName: 'Browser test fixture', origin: 'paste',
       excerpts: [source], concepts: [{ id: 'association', title: 'Association and causation', sourceId: source.id, sourceQuote: source.text, openingQuestion: firstQuestion.text }],
@@ -143,9 +165,14 @@ async function mockPractice(page: Page, options: { denied?: boolean; holdTranscr
     if (path === '/api/status') return fulfill(route, status);
     if (path === `/api/practices/${practiceId}`) return fulfill(route, session);
     if (path === `/api/practices/${practiceId}/question-audio`) {
-      questionAudio.push((route.request().postDataJSON() as { questionId: string }).questionId);
-      if (options.holdAudio) await audioGate.promise;
-      await route.fulfill({ contentType: 'audio/wav', body: wavFixture() }).catch(() => {});
+      const requestedId = (route.request().postDataJSON() as { questionId: string }).questionId;
+      questionAudio.push(requestedId);
+      if (options.holdAudio || options.holdReplyAudio && requestedId === secondQuestionId) await audioGate.promise;
+      if (options.failReplyAudio && requestedId === secondQuestionId) {
+        await route.fulfill({ status: 503, json: { error: 'Test fallback to the device voice.' } });
+        audioResponses += 1; return;
+      }
+      await route.fulfill({ contentType: 'audio/wav', body: wavFixture(options.finalQuestion && session.phase === 'complete' ? 1.2 : 0.4) }).catch(() => {});
       audioResponses += 1;
       return;
     }
@@ -153,7 +180,7 @@ async function mockPractice(page: Page, options: { denied?: boolean; holdTranscr
       recordings.push(route.request().postDataBuffer() ?? Buffer.alloc(0));
       if (options.holdTranscription) await transcriptionGate.promise;
       if (options.failTranscription) await route.fulfill({ status: 503, json: { error: 'Transcription is temporarily unavailable in this test.' } }).catch(() => {});
-      else await fulfill(route, { text: transcript, model: 'mock-only' }).catch(() => {});
+      else await fulfill(route, { text: options.transcriptText ?? transcript, model: 'mock-only' }).catch(() => {});
       transcriptionResponses += 1;
       return;
     }
@@ -171,14 +198,23 @@ async function mockPractice(page: Page, options: { denied?: boolean; holdTranscr
     submissions, questionAudio, recordings,
     releaseTranscription: transcriptionGate.resolve, releaseAudio: audioGate.resolve,
     transcriptionResponses: () => transcriptionResponses, audioResponses: () => audioResponses,
-    advance() {
+    advance(reply?: string) {
       if (submissions.length !== 1) throw new Error('A saved answer is required before advancing the mock session.');
       const answer = submissions[0].answer;
       session = { ...session, phase: 'ready', version: session.version + 1, pendingAnswer: null,
-        currentQuestion: { id: secondQuestionId, number: 2, text: 'How could a common cause change the interpretation?', conceptId: 'association', kind: 'probe' },
+        currentQuestion: { id: secondQuestionId, number: 2, text: nextQuestionText, conceptId: 'association', kind: 'probe' },
         turns: [{ id: 'saved-test-turn', question: firstQuestion, answer, createdAt: timestamp,
           feedback: { assessment: 'unclear', claimQuote: null, sourceId: source.id, sourceQuote: source.text,
-            observation: 'A mocked response for voice-flow testing.', followUp: 'How could a common cause change the interpretation?', followUpKind: 'probe', source: 'fallback', reviewStatus: 'unavailable' } }],
+            ...(reply ? { reply } : {}), observation: 'A mocked response for voice-flow testing.', followUp: nextQuestionText, followUpKind: 'probe', source: 'fallback', reviewStatus: 'unavailable' } }],
+      };
+    },
+    complete(reply: string) {
+      if (submissions.length !== 1 || !options.finalQuestion) throw new Error('Save the sixth answer before completing this test session.');
+      session = { ...session, phase: 'complete', version: session.version + 1, currentQuestion: null, pendingAnswer: null,
+        turns: [...previousTurns, { id: 'final-test-turn', question: firstQuestion, answer: submissions[0].answer, createdAt: timestamp,
+          feedback: { assessment: 'unclear', claimQuote: null, sourceId: source.id, sourceQuote: source.text, reply,
+            observation: 'The final answer is saved.', followUp: '', followUpKind: 'transfer', source: 'fallback', reviewStatus: 'unavailable' } }],
+        review: { strengths: [], revisit: [], nextSteps: [], source: 'fallback', note: 'A mocked review for playback testing.' },
       };
     },
   };
@@ -217,8 +253,9 @@ test('a live voice session hears the question, sends one answer, then automatica
   expect(mock.submissions[0].idempotencyKey).toMatch(/^[a-f0-9-]+$/);
   expect(mock.recordings).toHaveLength(1);
   expect(mock.recordings[0].subarray(0, 4).toString()).toBe('RIFF');
-  mock.advance();
+  mock.advance(unsureReply);
   await expect(page.getByRole('heading', { name: 'How could a common cause change the interpretation?', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Coach response', exact: true })).toContainText(unsureReply);
   await expect(page.getByRole('button', { name: 'Done speaking', exact: true })).toBeVisible();
   await expect.poll(async () => (await voiceState(page)).microphoneRequests).toBe(2);
   expect(mock.questionAudio).toEqual([firstQuestionId, secondQuestionId]);
@@ -231,6 +268,102 @@ test('a live voice session hears the question, sends one answer, then automatica
   await settleReact(page);
   expect(mock.submissions).toHaveLength(1);
   expect(mock.recordings).toHaveLength(1);
+});
+
+test('an unsure answer receives a visible reply and the device finishes reply plus question before listening', async ({ page }) => {
+  const mock = await mockPractice(page, { transcriptText: "I don't know.", failReplyAudio: true, holdDeviceSpeech: true });
+  await beginRecording(page);
+  await page.getByRole('button', { name: 'Done speaking', exact: true }).click();
+  await expect.poll(() => mock.submissions.length).toBe(1);
+  expect(mock.submissions[0].answer).toBe("I don't know.");
+  mock.advance(unsureReply);
+  const reply = page.getByRole('region', { name: 'Coach response', exact: true });
+  await expect(reply).toContainText(unsureReply);
+  await expect(page.getByRole('heading', { name: nextQuestionText, exact: true })).toBeVisible();
+  expect(await reply.evaluate((element, question) => {
+    const heading = [...document.querySelectorAll('h1,h2,h3')].find(item => item.textContent === question);
+    return Boolean(heading && element.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }, nextQuestionText)).toBe(true);
+  await expect.poll(async () => (await voiceState(page)).deviceCalls).toBe(1);
+  const speaking = await voiceState(page);
+  expect(speaking.deviceTexts.map(text => text.replace(/\s+/g, ' ').trim())).toEqual([`${unsureReply} ${nextQuestionText}`]);
+  expect(speaking.microphoneRequests).toBe(1);
+  await expect(page.getByRole('button', { name: 'Done speaking', exact: true })).toHaveCount(0);
+  await expect(page.locator('.question-playback')).toContainText('Device voice');
+  await page.evaluate(() => (window as unknown as { finishDeviceSpeech(): void }).finishDeviceSpeech());
+  await expect(page.getByRole('button', { name: 'Done speaking', exact: true })).toBeVisible();
+  const listening = await voiceState(page);
+  expect(listening.microphoneRequests).toBe(2);
+  expect(listening.audioEndedAtMicrophone).toEqual([true, true]);
+  expect(listening.timeline.lastIndexOf('device-ended')).toBeLessThan(listening.timeline.lastIndexOf('microphone-request'));
+  expect(mock.questionAudio).toEqual([firstQuestionId, secondQuestionId]);
+  await page.getByRole('button', { name: 'Stop voice session', exact: true }).click();
+  expect(mock.submissions).toHaveLength(1);
+  expect(mock.recordings).toHaveLength(1);
+});
+
+test('pausing a pending conversational reply keeps it visible without late playback or listening', async ({ page }) => {
+  const mock = await mockPractice(page, { holdReplyAudio: true });
+  try {
+    await beginRecording(page);
+    await page.getByRole('button', { name: 'Done speaking', exact: true }).click();
+    await expect.poll(() => mock.submissions.length).toBe(1);
+    mock.advance(unsureReply);
+    await expect.poll(() => mock.questionAudio.length).toBe(2);
+    await expect(page.getByRole('region', { name: 'Coach response', exact: true })).toContainText(unsureReply);
+    await page.getByRole('button', { name: 'Pause voice session', exact: true }).click();
+    mock.releaseAudio();
+    await expect.poll(mock.audioResponses).toBe(2);
+    await expect(stageResume(page)).toBeVisible();
+    await settleReact(page);
+    const paused = await voiceState(page);
+    expect(paused.audioPlays).toBe(1);
+    expect(paused.deviceCalls).toBe(0);
+    expect(paused.microphoneRequests).toBe(1);
+    expect(paused.activeTracks).toBe(0);
+    await expect(page.getByRole('button', { name: 'Hear response and question', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Done speaking', exact: true })).toHaveCount(0);
+    expect(mock.submissions).toHaveLength(1);
+  } finally { mock.releaseAudio(); }
+});
+
+test('the sixth answer plays its closing reply once and never reopens the microphone', async ({ page }) => {
+  const mock = await mockPractice(page, { finalQuestion: true });
+  await beginRecording(page);
+  await page.getByRole('button', { name: 'Done speaking', exact: true }).click();
+  await expect.poll(() => mock.submissions.length).toBe(1);
+  mock.complete(closingReply);
+  await expect(page.getByRole('heading', { name: /A clearer place to go next/ })).toBeVisible();
+  await expect(page.getByText(closingReply, { exact: true }).first()).toBeVisible();
+  await expect.poll(async () => (await voiceState(page)).audioPlays).toBe(2);
+  const playback = page.getByRole('group', { name: 'Final response playback', exact: true });
+  await expect(playback.getByRole('button', { name: 'Hear final response', exact: true })).toBeVisible();
+  const complete = await voiceState(page);
+  expect(complete.timeline.filter(event => event === 'question-ended')).toHaveLength(2);
+  expect(complete.microphoneRequests).toBe(1);
+  expect(complete.activeTracks).toBe(0);
+  expect(mock.questionAudio).toEqual([firstQuestionId, firstQuestionId]);
+  expect(mock.recordings).toHaveLength(1);
+  expect(mock.submissions).toHaveLength(1);
+  await expect(page.getByRole('button', { name: 'Done speaking', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Pause voice session', exact: true }).click();
+  await playback.getByRole('button', { name: 'Hear final response', exact: true }).click();
+  await expect(playback.getByRole('button', { name: 'Stop final response audio', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Stop voice session', exact: true }).click();
+  await expect(playback.getByRole('button', { name: 'Hear final response', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { lastVoiceFlowAudio: HTMLMediaElement }).lastVoiceFlowAudio.paused)).toBe(true);
+  expect((await voiceState(page)).microphoneRequests).toBe(1);
+  expect(mock.questionAudio).toEqual([firstQuestionId, firstQuestionId, firstQuestionId]);
+  await page.reload();
+  await expect(playback.getByRole('button', { name: 'Hear final response', exact: true })).toBeVisible();
+  await settleReact(page);
+  expect((await voiceState(page)).audioPlays).toBe(0);
+  expect((await voiceState(page)).microphoneRequests).toBe(0);
+  await playback.getByRole('button', { name: 'Hear final response', exact: true }).click();
+  await expect.poll(async () => (await voiceState(page)).audioPlays).toBe(1);
+  await expect(playback.getByRole('button', { name: 'Hear final response', exact: true })).toBeVisible();
+  expect((await voiceState(page)).microphoneRequests).toBe(0);
+  expect(mock.questionAudio).toEqual([firstQuestionId, firstQuestionId, firstQuestionId, firstQuestionId]);
 });
 
 test('transcript review is persisted and waits for an explicit submission', async ({ page }) => {

@@ -2,10 +2,12 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowDown, ArrowRight, Mic, Play, Square, Type, Volume2 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import type { PracticeSession, ServerStatus } from '../shared/types';
+import { getSpokenPrompt } from '../shared/conversation';
 import { api, errorMessage } from './api';
 import { ErrorNotice, Spinner, VoiceForm } from './components';
 import { submissionKey, useDraft } from './hooks';
 import { useMicrophone, useQuestionVoice } from './voice';
+import { ConversationReply } from './ConversationReply';
 import './voice-session.css';
 
 export interface AnswerStageProps {
@@ -25,6 +27,8 @@ type RecordingContext = { epoch: number; hadDraft: boolean };
 
 export function AnswerStage({ session, status, connected, accept, notify, voiceEnabled, voicePaused, onVoiceEnabled, onVoicePaused, onResumeBlockedChange }: AnswerStageProps) {
   const question = session.currentQuestion!;
+  const prompt = getSpokenPrompt(session);
+  const previousTurn = session.turns.at(-1);
   const reduce = useReducedMotion();
   const [answer, setAnswer] = useDraft(`vivacoach:answer:${session.id}:${question.id}`, '');
   const [reviewTranscript, setReviewTranscript] = useDraft('vivacoach:review-transcript', false);
@@ -48,7 +52,7 @@ export function AnswerStage({ session, status, connected, accept, notify, voiceE
   answerRef.current = answer;
   gate.current = { enabled: voiceEnabled, paused: voicePaused, connected, review: reviewTranscript };
 
-  const voice = useQuestionVoice(session.id, question, session.mode, status);
+  const voice = useQuestionVoice(session.id, question, session.mode, status, prompt?.text);
   const microphone = useMicrophone(audio => { void transcribe(audio); });
   const controls = useRef({ voice, microphone });
   controls.current = { voice, microphone };
@@ -234,22 +238,23 @@ export function AnswerStage({ session, status, connected, accept, notify, voiceE
   const opensMicrophoneNext = voiceEnabled && !voicePaused && startingTurn;
   const busy = pending || transcribing || microphone.requesting || startingTurn || microphone.recording;
   const stateLabel = pending ? 'Sending your answer' : transcribing ? 'Transcribing your answer' : microphone.recording ? 'Your turn'
-    : microphone.requesting ? 'Waiting for your microphone' : speaking ? 'Examiner speaking' : voice.state === 'loading' || startingTurn ? 'Preparing question audio'
+    : microphone.requesting ? 'Waiting for your microphone' : speaking ? prompt?.reply ? 'Coach speaking' : 'Examiner speaking' : voice.state === 'loading' || startingTurn ? prompt?.reply ? 'Preparing response audio' : 'Preparing question audio'
     : voiceEnabled && voicePaused ? 'Voice session paused' : transcriptReady ? 'Review your transcript' : answer.trim() ? 'Your draft is here' : voiceEnabled ? 'Ready to continue' : 'Have a conversation';
   const stateDetail = pending ? 'Your explanation is being saved.' : transcribing ? voicePaused ? 'Your transcript is still being prepared. Resume becomes available when it is saved.' : 'You can pause or stop voice. The transcript will still be saved for review.'
     : microphone.recording ? `${timer} / 01:30 · Choose Done speaking when you are ready.`
     : microphone.requesting ? 'Allow microphone access in your browser, or type below.'
-    : speaking ? opensMicrophoneNext ? 'Your microphone opens after the question finishes.' : 'Listen to the question, then type your answer below.'
-    : voice.state === 'loading' || startingTurn ? opensMicrophoneNext ? 'Your microphone stays off until the question has finished.' : 'Loading question audio. Your microphone is off.'
-    : voiceEnabled && voicePaused ? recordedAudio ? 'Your recording is saved. Retry transcription or discard the audio below before resuming.' : answer.trim() ? 'Your draft stays here. Resume replays the question; any new speech is added for review.' : 'Resume to hear the question again, then continue speaking. Your microphone is off until then.'
+    : speaking ? opensMicrophoneNext ? prompt?.reply ? 'Listen to the response and next question. Your microphone opens when they finish.' : 'Your microphone opens after the question finishes.' : 'Listen, then type your answer below.'
+    : voice.state === 'loading' || startingTurn ? opensMicrophoneNext ? 'Your microphone stays off until the response and question have finished.' : 'Loading audio. Your microphone is off.'
+    : voiceEnabled && voicePaused ? recordedAudio ? 'Your recording is saved. Retry transcription or discard the audio below before resuming.' : answer.trim() ? 'Your draft stays here. Resume replays the prompt; any new speech is added for review.' : 'Resume to hear the prompt again, then continue speaking. Your microphone is off until then.'
     : transcriptReady ? 'Check the words below, then send your answer.'
     : answer.trim() ? 'Your saved draft stays here. A spoken answer will be added for review.'
     : 'Hear each question, then explain it in your own words.';
 
   return <section className={`answer-stage voice-answer-stage ${session.mode === 'demo' ? 'voice-answer-stage--demo' : ''}`}>
+    {prompt?.reply && previousTurn && <ConversationReply text={prompt.reply} feedback={previousTurn.feedback} />}
     <div className="question-overline"><span className="eyebrow">{question.kind === 'explain' ? 'Explain it in your words' : question.kind === 'transfer' ? 'Try it in a new situation' : 'Let’s look a little closer'}</span><span>{concept?.title}</span></div>
     <AnimatePresence mode="wait"><motion.h1 key={question.id} initial={reduce ? false : { opacity: 0, y: 9 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: reduce ? 1 : 0 }} transition={{ duration: reduce ? 0 : .25 }}>{question.text}</motion.h1></AnimatePresence>
-    <div className="question-playback"><button type="button" className="text-button" onClick={manualPlayback} disabled={microphone.recording || microphone.requesting || pending || transcribing}>{voice.state === 'loading' ? <Spinner size={15} /> : speaking ? <Square size={13} /> : <Volume2 size={16} />}{voice.state === 'loading' ? 'Cancel playback' : speaking ? 'Stop question audio' : 'Hear the question'}</button><span aria-live="polite">{voice.sourceLabel}</span></div>
+    <div className="question-playback"><button type="button" className="text-button" onClick={manualPlayback} disabled={microphone.recording || microphone.requesting || pending || transcribing}>{voice.state === 'loading' ? <Spinner size={15} /> : speaking ? <Square size={13} /> : <Volume2 size={16} />}{voice.state === 'loading' ? 'Cancel playback' : speaking ? prompt?.reply ? 'Stop response audio' : 'Stop question audio' : prompt?.reply ? 'Hear response and question' : 'Hear the question'}</button><span aria-live="polite">{voice.sourceLabel}</span></div>
     {voice.notice && <p className="voice-notice" role="status">{voice.notice}</p>}
 
     {session.mode === 'live' && <div className={`voice-session ${microphone.recording ? 'voice-session--listening' : ''} ${voiceEnabled && voicePaused ? 'voice-session--paused' : ''}`} role="group" aria-label="Voice session">
