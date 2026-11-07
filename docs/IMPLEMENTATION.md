@@ -5,9 +5,9 @@
 - Build the agreed peer-learning loop: answer and reason → cautious interpretation and clarification → lecturer-approved peer discussion → independent transfer question.
 - Local application first. No Supabase, Vercel account or public deployment is required.
 - React and TypeScript interface, Vite build, Node/Express server, SQLite persistence. One origin for the interface and API. Polling keeps small rooms synchronised without hosted realtime infrastructure.
-- Private GitHub backup at SH4D0W074/pairwise, once authenticated. Commit and push meaningful milestones; never commit keys, participant data or database files.
+- Private GitHub backup at SH4D0W074/pairwise. Commit and push meaningful milestones; never commit keys, participant data or database files.
 - Anonymous browser identities, server-owned host controls, separate lecturer/student/presentation views. Displaying explanations is an explicit lecturer reveal; students see a disclosure before submitting.
-- One fully authored statistics lesson, with a physics lesson only once the core works.
+- Two fully authored lessons: sampling bias and forces/motion.
 - Clearly labelled demonstration fixtures. Live model failures never silently turn into simulated analysis.
 
 ## Visual direction
@@ -16,13 +16,17 @@ Warm paper workspaces, an ink-dark presentation wall, electric vermilion actions
 
 ## Milestones
 
-- [ ] Foundation, shared contracts, secret exclusions and repository setup.
-- [ ] Persistent rooms, anonymous joining, host permissions and response collection.
-- [ ] Evidence-checked model analysis, clarification and deterministic pairing.
-- [ ] Complete lecturer, student and presentation interfaces.
-- [ ] Independent transfer question, honest summaries and labelled demo mode.
-- [ ] Integration, failure-path tests, accessibility and browser inspection.
-- [ ] Local launch instructions, concise demo script and final GitHub backup.
+- [x] Foundation, shared contracts, secret exclusions and repository setup.
+- [x] Persistent rooms, anonymous joining, host permissions and response collection.
+- [x] Evidence-checked model analysis, clarification and deterministic pairing.
+- [x] Complete lecturer, student and presentation interfaces.
+- [x] Independent transfer question, honest summaries and labelled demo mode.
+- [x] Integration, failure-path tests, keyboard controls and browser inspection.
+- [x] Local launch instructions and concise demo script.
+- [x] Final source, local launch guide and demo script backed up to GitHub.
+- [ ] CI confirmation on the final source revision.
+
+Live provider verification remains separate: credentials and a testing budget are still required. The complete local demo and fallback classroom flow run without them.
 
 ## Acceptance checks
 

@@ -523,7 +523,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
   .board-heading--question h1 { font-size: 36px; }
   .board-question-context { font-size: 12px; margin-top: 11px; }
   .board-heading > p:not(.board-question-context) { font-size: 12px; margin-top: 11px; }
-  .answer-object { height: 178px; }
+  .answer-object { height: 165px; }
   .answer-object__face { padding: 16px 19px 12px; }
   .answer-object__letter { font-size: 72px; }
   .answer-object__reason { font-size: 24px; margin-top: 13px; }
