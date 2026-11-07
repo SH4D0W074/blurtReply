@@ -15,6 +15,7 @@ Checked locally on 7 November 2026, using Node 24 and Chrome. Automated checks r
 2. **Browser microphone flow:** synthetic speech was supplied through Chrome's real microphone recording interface. The waveform responded to measured audio, OpenAI returned the spoken sentence, and the editable transcript was submitted through the actual examiner/checker/coach flow. All four agent roles appeared and the final review came from live AI. No real microphone was accessed during this test; no browser JavaScript errors occurred.
 3. **Recorded speech:** a 5.4-second synthetic WAV produced the expected transcript through `gpt-transcribe`. Two earlier attempts using an empty system-generated file were rejected; the corrected recording and browser WebM path both passed.
 4. **Uploaded subject:** custom ethics notes produced distinct concepts for consequences/welfare, duties/constraints and character/practical judgement. Every citation matched the original supplied text. This test exposed and resolved a fragile planner quotation-copying requirement: the planner now selects source IDs and the application attaches exact text.
+5. **Live ElevenLabs playback:** after configuring the server key, Chrome played a real 5.62-second MP3 for an 89-character examiner question through the production app. The interface showed **ElevenLabs voice**, with no device fallback or browser errors. Replaying the question worked and left the generation counter unchanged. This check used one ElevenLabs generation and one OpenAI planning request; audio bytes were not independently compared.
 
 The measured eight-request text check used 5,504 input tokens and 1,512 output tokens (including 413 reasoning tokens), about $0.00131 at the documented model rates. Overall testing used a small number of additional bounded requests; account billing was not queried. No unbounded loops, automatic retries or long voice sessions were used.
 
@@ -28,7 +29,7 @@ The measured eight-request text check used 5,504 input tokens and 1,512 output t
 ## Limits of these checks
 
 - Live model outputs vary. This is a small end-to-end check, not a learning-outcome study or a broad accuracy evaluation across university subjects and accents.
-- ElevenLabs request/caching/fallback behavior has automated coverage, but live ElevenLabs synthesis remains unverified because no key was configured.
+- ElevenLabs was checked with one short English question and a cached replay. This verifies the configured voice and playback path, not every voice, language or network condition.
 - Microphone permission behavior and device speech vary by browser. Chrome's recording flow was verified; the typed path remains available elsewhere.
 - Scanned PDFs and diagrams are outside scope. Very long unbroken source passages or ambiguous source material can lead to labelled fallback feedback.
 
