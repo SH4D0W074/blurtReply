@@ -6,7 +6,7 @@ Course revision through a short oral examination. Choose a sample subject or upl
 
 ## Cooperating agents
 
-1. Curriculum planner extracts three concepts with exact citations from supplied material.
+1. Curriculum planner selects three concepts and valid source IDs from supplied material. The application attaches the entire original excerpt; it does not ask the model to reproduce a quotation.
 2. Examiner retrieves relevant source excerpts through a bounded tool loop, interprets an answer and proposes the next question.
 3. Evidence checker independently reviews the examiner's proposal against the student's words and sources. Unsupported feedback is rejected or softened into a clarification; exact quote validation also runs in code.
 4. Revision coach reads the accumulated accepted evidence and prepares specific next steps linked to turns and source excerpts.
@@ -35,9 +35,9 @@ Interaction: voice form reacts to actual microphone level; an examiner question 
 - `GET /api/status` → ServerStatus.
 - `GET /api/samples` → SampleCourse[].
 - `GET /api/practices` → RecentPractice[] belonging to this browser, no identity creation on public reads.
-- `POST /api/practices {mode, sampleId? ,title?,sourceName?,text?,origin?}` → PracticeSession. Only this create mutation allocates an anonymous identity.
+- `POST /api/practices {mode, sampleId? ,title?,sourceName?,text?,origin?}` → a persisted PracticeSession in the thinking phase, then background preparation. Only this create mutation allocates an anonymous identity.
 - `GET /api/practices/:id` → owner-only PracticeSession. Poll while thinking to see actual agent events.
-- `POST /api/practices/:id/answers {questionId,answer,idempotencyKey}` → PracticeSession. Persist input before AI calls; reject parallel or stale submissions, replay idempotently.
+- `POST /api/practices/:id/answers {questionId,answer,idempotencyKey}` → PracticeSession in the thinking phase. Persist input before AI calls; reject parallel or stale submissions, replay idempotently. The browser polls real progress.
 - `POST /api/practices/:id/finish {}` → PracticeSession. Allowed when ready; creates a review from completed turns.
 - `POST /api/practices/:id/transcriptions` with a raw audio body and its audio Content-Type → `{text,model}`. Owner only, bounded payload, no storage.
 - `POST /api/practices/:id/question-audio {questionId}` → MP3 of server-owned current question. Owner only; optional provider, cached.
@@ -45,10 +45,16 @@ Interaction: voice form reacts to actual microphone level; an examiner question 
 
 ## Agent module contract
 
-`server/agents.ts` exports `prepareCourse(input, mode, emit)`, `reviewAnswer(course, question, answer, turns, mode, emit)`, `createReview(course, turns, mode, emit)`, and `getTextAIStatus()`; return types are CourseContent, Feedback, PracticeReview, and the text-related subset of ServerStatus. `server/courses.ts` exports sample-course previews and source material used by prepareCourse. Emit receives AgentReporter events.
+`server/agents.ts` exports `prepareCourse(input, mode, emit)`, `reviewAnswer(course, question, answer, turns, mode, emit)`, `createReview(course, turns, mode, emit)`, and `getTextAIStatus()`; return types are CourseContent, Feedback, PracticeReview, and the text-related subset of ServerStatus. `getTextAIUsage()` exposes process counters without prompts or secrets for local validation. `server/courses.ts` exports sample-course previews, source material, and explicit authored-demo fixtures. Emit receives AgentReporter events.
 
 `server/voice.ts` exports `getVoiceStatus()`, `transcribeAudio(buffer, mime, context)`, and `speakQuestion(text, cacheKey)`. Provider calls have deadlines, no automatic retry, and conservative call caps. Root owns this file.
 
 ## Validation goals
 
 Real source upload, quote provenance, evidence-checker veto, bounded tool execution, saved/reloaded sessions, simultaneous submit protection, microphone denial and editable transcription, unconfigured/failing provider states, complete guided demo, mobile layout, keyboard access, and real live API checks within the previously approved modest budget.
+
+## Verified API references
+
+- [OpenAI file transcription](https://developers.openai.com/api/docs/guides/speech-to-text): completed recordings through `audio.transcriptions.create` using `gpt-transcribe`.
+- [OpenAI GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna): economical text model used for the four roles.
+- [ElevenLabs text-to-speech](https://elevenlabs.io/docs/eleven-api/guides/how-to/text-to-speech/streaming): optional server-held voice key and audio generation. The integration is implemented; live verification requires a key.

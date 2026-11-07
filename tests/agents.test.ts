@@ -30,6 +30,9 @@ function proposal(overrides: Record<string, unknown> = {}) {
 function verifier(overrides: Record<string, unknown> = {}) {
   return { verdict: 'accept', claimFaithful: true, sourceSupportsAssessment: true, observationSupported: true, followUpGrounded: true, issue: 'none', ...overrides };
 }
+function planner() {
+  return { title: course.title, subject: course.subject, concepts: course.concepts.map(({ sourceQuote: _quote, ...concept }) => concept) };
+}
 function enable(maxCalls = 60) {
   vi.stubEnv('VIVACOACH_LIVE_AI', 'true');
   vi.stubEnv('OPENAI_API_KEY', 'test-only-key-never-sent');
@@ -90,13 +93,40 @@ describe('honest demo and course planning', () => {
     expect(emit.mock.calls[0][0]).toMatchObject({ state: 'limited', label: 'Prepared generic reading prompts' });
   });
 
-  it('accepts an exact source-grounded plan but rejects a quotation that drops a qualifier', async () => {
+  it('resolves planner source IDs to original quotes instead of asking the model to copy them', async () => {
     enable();
-    const plan = { title: course.title, subject: course.subject, concepts: course.concepts };
+    const plan = planner();
     provider.create.mockResolvedValueOnce(response(plan));
-    expect((await agents.prepareCourse({ sampleId: 'stats-causation' }, 'live', emit)).concepts).toEqual(plan.concepts);
-    const changed = structuredClone(plan);
-    changed.concepts[2].sourceQuote = 'Random assignment makes treatment allocation independent of baseline confounders.';
+    expect((await agents.prepareCourse({ sampleId: 'stats-causation' }, 'live', emit)).concepts).toEqual(course.concepts);
+    const conceptSchema = provider.create.mock.calls[0][0].text.format.schema.properties.concepts.items;
+    expect(conceptSchema.properties).toHaveProperty('sourceId');
+    expect(conceptSchema.properties).not.toHaveProperty('sourceQuote');
+  });
+
+  it('plans ordinary uploaded paragraph notes with exact qualifiers and newlines preserved by code', async () => {
+    enable();
+    const text = 'Consequentialism evaluates an action by its consequences. It does not imply that every desirable outcome justifies every available action; different theories specify different values and rules.\n\nDeontological ethics emphasises duties or constraints. A duty may count against an action even when that action would produce a desirable outcome.\n\nVirtue ethics considers character and practical wisdom. It asks what a good person would characteristically do, rather than treating a list of rules as a complete substitute for judgment.';
+    const concepts = [
+      { id: 'consequences', title: 'Evaluate consequences', sourceId: 'note-1', openingQuestion: 'What does consequentialism use to evaluate an action, and what qualification matters?' },
+      { id: 'duties', title: 'Consider duties and constraints', sourceId: 'note-1', openingQuestion: 'How might a duty count against an action with a desirable outcome?' },
+      { id: 'virtues', title: 'Explain practical wisdom', sourceId: 'note-1', openingQuestion: 'What role do character and practical wisdom play in virtue ethics?' },
+    ];
+    provider.create.mockResolvedValueOnce(response({ title: 'Three ethical approaches', subject: 'Ethics', concepts }));
+    const result = await agents.prepareCourse({ text, sourceName: 'ethics-notes.txt', origin: 'upload' }, 'live', emit);
+    expect(result.origin).toBe('upload');
+    expect(result.concepts.map((concept) => concept.id)).toEqual(['consequences', 'duties', 'virtues']);
+    expect(result.concepts.every((concept) => concept.sourceQuote === text)).toBe(true);
+    expect(result.excerpts.map((source) => source.text).join('')).toBe(text);
+    expect(emit.mock.calls.at(-1)?.[0]).toMatchObject({ agent: 'planner', state: 'complete' });
+    expect(provider.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['unknown-source', 'duplicate-id', 'too-few-concepts'])('rejects an invalid planner result: %s', async (invalidCase) => {
+    enable();
+    const changed = planner();
+    if (invalidCase === 'unknown-source') changed.concepts[2].sourceId = 'not-in-the-source';
+    if (invalidCase === 'duplicate-id') changed.concepts[2].id = changed.concepts[0].id;
+    if (invalidCase === 'too-few-concepts') changed.concepts.pop();
     provider.create.mockResolvedValueOnce(response(changed));
     await agents.prepareCourse({ sampleId: 'stats-causation' }, 'live', emit);
     expect(emit.mock.calls.at(-1)?.[0]).toMatchObject({ agent: 'planner', state: 'limited' });
@@ -209,7 +239,7 @@ describe('budgets, deadlines and final review', () => {
     expect(second).toEqual(course);
     expect(provider.create).toHaveBeenCalledTimes(1);
     expect(agents.getTextAIStatus().remainingTextCalls).toBe(0);
-    resolve(response({ title: course.title, subject: course.subject, concepts: course.concepts }));
+    resolve(response(planner()));
     await first;
     expect(emit.mock.calls.some(([event]) => event.detail?.includes('budget is exhausted'))).toBe(true);
   });
@@ -232,7 +262,7 @@ describe('budgets, deadlines and final review', () => {
   it('does not force unsupported reasoning settings onto an explicitly configured model', async () => {
     enable();
     vi.stubEnv('OPENAI_MODEL', 'configured-model');
-    provider.create.mockResolvedValueOnce(response({ title: course.title, subject: course.subject, concepts: course.concepts }));
+    provider.create.mockResolvedValueOnce(response(planner()));
     await agents.prepareCourse({ sampleId: 'stats-causation' }, 'live', emit);
     expect(provider.create.mock.calls[0][0].model).toBe('configured-model');
     expect(provider.create.mock.calls[0][0].reasoning).toBeUndefined();

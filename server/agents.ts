@@ -93,7 +93,7 @@ const plannerSchema = z.object({
   title: z.string().min(1).max(100), subject: z.string().min(1).max(80),
   concepts: z.array(z.object({
     id: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/), title: z.string().min(1).max(100),
-    sourceId: z.string().min(1).max(80), sourceQuote: z.string().min(1).max(6_000),
+    sourceId: z.string().min(1).max(80),
     openingQuestion: z.string().min(10).max(400),
   }).strict()).length(3),
 }).strict();
@@ -138,16 +138,22 @@ export async function prepareCourse(input: CourseInput, mode: PracticeMode, emit
   }
   try {
     const result = await request({
-      instructions: `You are the curriculum planner. ${untrustedRule} Extract exactly three useful, distinct revision concepts grounded only in supplied excerpts. Give each a short title and an oral opening question. Copy the ENTIRE cited excerpt exactly into sourceQuote; never shorten a quotation or drop a qualifier. Do not invent page numbers, sources or facts. Questions must be answerable from the notes. If the material is insufficient, do not pretend three concepts are supported.`,
+      instructions: `You are the curriculum planner. ${untrustedRule} Extract exactly three useful, distinct revision concepts grounded only in supplied excerpts. Give each a short title and an oral opening question. For each concept, select the sourceId of a supplied excerpt that supports it. Do not reproduce or rewrite source text: the application attaches the complete original excerpt using that ID. Multiple distinct concepts may cite the same excerpt when it supports them. Do not invent page numbers, sources or facts. Questions must be answerable from the notes. If the material is insufficient, do not pretend three concepts are supported.`,
       input: JSON.stringify({ title: base.title, excerpts: base.excerpts }),
       text: { format: zodTextFormat(plannerSchema, 'curriculum_plan') },
     }, emit, 'planner', 'Planner is selecting three source-grounded concepts', base.excerpts.map((source) => source.id));
     const plan = parse(plannerSchema, result);
     if (new Set(plan.concepts.map((concept) => concept.id)).size !== 3
-      || new Set(plan.concepts.map((concept) => concept.title.toLowerCase())).size !== 3
-      || plan.concepts.some((concept) => !exactSource(base, concept.sourceId, concept.sourceQuote))) throw new AgentFailure('invalid');
-    report(emit, 'planner', 'complete', 'Three concepts linked to exact source excerpts', plan.concepts.map((concept) => concept.sourceId), 'Source provenance checked; concept relevance remains a model interpretation.');
-    return { ...base, title: input.title?.trim() || plan.title, subject: plan.subject, concepts: plan.concepts };
+      || new Set(plan.concepts.map((concept) => concept.title.toLowerCase())).size !== 3) throw new AgentFailure('invalid');
+    const sourcesById = new Map(base.excerpts.map((source) => [source.id, source]));
+    const concepts: Concept[] = plan.concepts.map((concept) => {
+      const source = sourcesById.get(concept.sourceId);
+      if (!source) throw new AgentFailure('invalid');
+      // Resolve the full original quote locally. The model selects evidence; it never rewrites it.
+      return { ...concept, sourceQuote: source.text };
+    });
+    report(emit, 'planner', 'complete', 'Three concepts linked to exact source excerpts', concepts.map((concept) => concept.sourceId), 'Original source text attached by the application; concept relevance remains a model interpretation.');
+    return { ...base, title: input.title?.trim() || plan.title, subject: plan.subject, concepts };
   } catch (error) {
     report(emit, 'planner', 'limited', 'Using a source-based fallback plan', base.concepts.map((concept) => concept.sourceId), `${failureLabel(error)} ${base.origin === 'sample' ? 'The sample plan is authored.' : 'These are generic reading prompts, not AI-extracted concepts.'}`);
     return base;

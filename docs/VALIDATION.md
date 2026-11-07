@@ -1,0 +1,35 @@
+# VivaCoach validation
+
+Checked locally on 7 November 2026, using Node 24 and Chrome. Automated checks run on every code push to the private VivaCoach repository.
+
+## Automated checks
+
+- **48 unit/integration tests:** course fixtures, planner source selection, examiner tools, verifier veto/softening, provenance, prompt-injection boundaries, call budgets, timeouts, provider failures, revision evidence, session ownership, idempotency, persistence, crash recovery and audio boundaries.
+- **4 browser scenarios:** full six-answer demo with source inspection and reload; mobile biology practice with early review and keyboard tabs; microphone denial with a usable typed fallback; real PDF extraction and saved upload material.
+- TypeScript checking and production build pass.
+- GitHub Actions also runs installation, typechecking, tests, build, and Chromium browser tests without real API credentials.
+
+## Live checks
+
+1. **Four-agent text flow:** a real planner prepared a statistics practice. The examiner used `read_source`, proposed feedback on a causal overclaim, and passed it to a separate verifier. The verifier accepted the first proposal, softened the second, and the coach excluded the unassessed answer. Eight text requests, two source-tool calls, no failed provider calls; approximately 21.5 seconds for the two-answer sequence and review.
+2. **Browser microphone flow:** synthetic speech was supplied through Chrome's real microphone recording interface. The waveform responded to measured audio, OpenAI returned the spoken sentence, and the editable transcript was submitted through the actual examiner/checker/coach flow. All four agent roles appeared and the final review came from live AI. No real microphone was accessed during this test; no browser JavaScript errors occurred.
+3. **Recorded speech:** a 5.4-second synthetic WAV produced the expected transcript through `gpt-transcribe`. Two earlier attempts using an empty system-generated file were rejected; the corrected recording and browser WebM path both passed.
+4. **Uploaded subject:** custom ethics notes produced distinct concepts for consequences/welfare, duties/constraints and character/practical judgement. Every citation matched the original supplied text. This test exposed and resolved a fragile planner quotation-copying requirement: the planner now selects source IDs and the application attaches exact text.
+
+The measured eight-request text check used 5,504 input tokens and 1,512 output tokens (including 413 reasoning tokens), about $0.00131 at the documented model rates. Overall testing used a small number of additional bounded requests; account billing was not queried. No unbounded loops, automatic retries or long voice sessions were used.
+
+## Visual and recovery checks
+
+- Desktop layouts checked at 1440×1000, 1440×900 and 1280×720; mobile at 390×844. Source text wraps, modal content remains readable and the tested layouts have no horizontal overflow.
+- Reduced motion, reading mode, keyboard tab navigation, source-dialog dismissal and editable drafts were exercised.
+- Restart simulations covered planner, examiner and coach work. Saved inputs remained available, late results were discarded, and no paid retry was started automatically.
+- Both authored sample courses completed all six answers without model calls.
+
+## Limits of these checks
+
+- Live model outputs vary. This is a small end-to-end check, not a learning-outcome study or a broad accuracy evaluation across university subjects and accents.
+- ElevenLabs request/caching/fallback behavior has automated coverage, but live ElevenLabs synthesis remains unverified because no key was configured.
+- Microphone permission behavior and device speech vary by browser. Chrome's recording flow was verified; the typed path remains available elsewhere.
+- Scanned PDFs and diagrams are outside scope. Very long unbroken source passages or ambiguous source material can lead to labelled fallback feedback.
+
+Detailed synthetic test reports and screenshots are in ignored `.local/validation/`. They contain no API keys and are intentionally excluded from the GitHub source backup.

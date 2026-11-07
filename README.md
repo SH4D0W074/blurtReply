@@ -4,6 +4,8 @@
 
 VivaCoach turns course material into a short oral revision session. A student explains a concept, answers an adaptive follow-up, and receives feedback that points to their own words and the supplied notes. Built for GreatUniHack's Reply **AI on Campus** challenge, with teaching and learning at its centre.
 
+![VivaCoach revision studio](docs/images/vivacoach-preview.png)
+
 ## Start locally
 
 Requires Node.js 24 or newer and pnpm 11.25.0.
@@ -80,5 +82,7 @@ This prototype supports English revision with selectable text, not OCR, diagrams
 - `server/voice.ts`: transcription and optional ElevenLabs audio.
 - `tests/`: agent, persistence, provider-boundary, and browser checks.
 - [Implementation decisions](docs/IMPLEMENTATION.md).
+- [Demo walkthrough and pitch](docs/DEMO.md).
+- [Validation and known limits](docs/VALIDATION.md).
 
 Pairwise, the previous project, remains recoverable in `SH4D0W074/pairwise` at tag `pairwise-v1`. This branch is backed up separately to the private `SH4D0W074/vivacoach` repository.
